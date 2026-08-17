@@ -110,7 +110,7 @@ header{padding:calc(14px + env(safe-area-inset-top)) 0 8px}
 .more:active{background:var(--surface-2);border-color:var(--line)}
 
 /* ---------- notes ---------- */
-textarea,input[type=text]{
+textarea,input[type=text],input[type=number]{
   width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:13px;
   padding:11px 12px;color:var(--ink);font:inherit;font-size:15px;resize:vertical}
 textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -256,6 +256,7 @@ function save(){
 function migrate(s){
   s.habits ||= []; s.marks ||= {}; s.notes ||= {};
   s.doLess ||= []; s.doMore ||= []; s.settings ||= {};
+  s.autoClosed ||= {}; s.values ||= {};   // v2: quién escribió la marca y el valor real
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
   return s;
@@ -269,6 +270,8 @@ function seed(){
     createdAt: iso(new Date()),
     habits: names.map((n,i)=>({ id:uid(), name:n, order:i })),
     marks: {},
+    autoClosed: {},
+    values: {},
     notes: {},
     doLess: ["Usar el celu","Enojarme","Gastar sin pensar","Pensar en el tiempo"],
     doMore: ["Preguntar si no entiendo algo","Mejoras en la casa","Salir a caminar"],
@@ -312,7 +315,11 @@ function autoCloseDays(){
   for(let d = start; d <= yesterday; d = addDays(d,1)){
     const ds = iso(d), free = isWeekend(ds);
     for(const h of S.habits){
-      if(!getMark(ds, h.id)){ setMark(ds, h.id, free ? ST.BLUE : ST.YELLOW); filled++; }
+      if(!getMark(ds, h.id)){
+        setMark(ds, h.id, free ? ST.BLUE : ST.YELLOW);
+        markAutoClosed(S, ds, h.id);       // enganche 2: la marca es del robot
+        filled++;
+      }
     }
   }
   S.settings.lastClosed = iso(yesterday);
@@ -376,12 +383,288 @@ function countRange(y, m, from, to, hid){
 }
 
 /* =========================================================================
+   2.5. MÓDULO v2 — origen de las marcas, reglas rotas, metas, import
+   -------------------------------------------------------------------------
+   Viene de mi-prime-v2.js. Dos adaptaciones para convivir con el código que
+   ya estaba, sin cambiar ninguna lógica:
+     · no se redeclara ST (ya existe arriba, con los mismos valores)
+     · migrate() del módulo se llama acá migrateV2(), porque migrate() ya
+       existe y normaliza el estado v1 en cada load()
+   Prime % no se toca: sigue siendo verdes/(verdes+amarillos).
+   ========================================================================= */
+const ORIGIN = { MANUAL:"manual", AUTO:"auto", NONE:"none" };
+
+const METAS_INICIALES = {
+  "Caminar seguido":   { unidad:"min",    piso:10, meta:20, sube:5, tope:45, fuente:"exercise_time" },
+  "Inglés":            { unidad:"min",    piso:15, meta:30, sube:5, tope:60 },
+  "Leer":              { unidad:"min",    piso:10, meta:20, sube:5, tope:45 },
+  "Ejercicio":         { unidad:"series", piso:9,  meta:15, sube:3, tope:21 },
+  "Moverme cada hora": { unidad:"horas",  piso:6,  meta:8,  sube:1, tope:12, fuente:"move_hourly" }
+};
+
+function migrateV2(S, hoy){
+  if(S.version >= 2) return S;
+
+  S.autoClosed = S.autoClosed || {};   // { "2026-08-14": ["h7s5ohcv"] }
+  S.values     = S.values     || {};   // { "2026-08-14": { "hat3pk68": 32 } }
+
+  // "Caminar 6000 pasos" se parte en dos hábitos distintos
+  const caminar = S.habits.find(h => /6000\s*pasos/i.test(h.name));
+  if(caminar){
+    caminar.name = "Caminar seguido";
+    caminar.auto = { source:"steps", threshold:6000, near:0.90 };
+    S.habits.push({
+      id: "h" + Math.random().toString(36).slice(2, 9),
+      name: "Moverme cada hora",
+      order: S.habits.length
+    });
+  }
+
+  for(const h of S.habits){
+    const cfg = METAS_INICIALES[h.name];
+    if(cfg) h.goal = Object.assign({}, cfg, { desde: hoy });
+  }
+
+  S.version = 2;
+  return S;
+}
+
+/* ---- estadísticas: una sola pasada, todo lo que muestra la pantalla Hoy ----
+   Recorre el CALENDARIO, no las claves de marks, para que "dos amarillos
+   seguidos" signifique lo mismo acá que en prevIsYellow(): un día sin marcar
+   corta la cadena, el azul es transparente. */
+function stats(S, desde, hasta){
+  const claves = Object.keys(S.marks).sort();
+  let victorias = 0, amarillos = 0, reglasRotas = 0, tropiezos = 0;
+  let mejorRacha = 0, mejorLimpia = 0;
+  const rotasPor = [];
+  const ini = desde || claves[0], fin = hasta || claves[claves.length - 1];
+
+  for(const h of (ini && fin ? S.habits : [])){
+    let previo = null;      // último estado obligatorio: el azul no cuenta
+    let racha = 0, limpia = 0;
+
+    for(let d = parseISO(ini); iso(d) <= fin; d = addDays(d,1)){
+      const ds = iso(d);
+      const m = S.marks[ds]?.[h.id];
+      if(m === ST.BLUE) continue;             // el azul es transparente a todo
+      if(!m){ previo = null; continue; }       // sin marca: corta la cadena
+
+      if(m === ST.GREEN){
+        victorias++;
+        racha++;  limpia++;
+        if(racha  > mejorRacha)  mejorRacha  = racha;
+        if(limpia > mejorLimpia) mejorLimpia = limpia;
+        previo = ST.GREEN;
+        continue;
+      }
+
+      amarillos++;
+      racha = 0;                              // el amarillo siempre corta la racha
+      if(previo === ST.YELLOW){
+        reglasRotas++;
+        limpia = 0;                           // solo la regla rota corta la limpia
+        rotasPor.push({ fecha:ds, habito:h.name });
+      } else {
+        tropiezos++;
+        limpia++;
+        if(limpia > mejorLimpia) mejorLimpia = limpia;
+      }
+      previo = ST.YELLOW;
+    }
+  }
+
+  const base = victorias + amarillos;
+  return {
+    victorias,
+    reglasRotas,
+    tropiezos,
+    amarillos,
+    prime: base ? Math.round(1000 * victorias / base) / 10 : 0,
+    mejorRacha,
+    mejorRachaLimpia: mejorLimpia,
+    rotasPor
+  };
+}
+
+/* ---- metas y progresión automática ----
+   Sube tras 21 días cumpliendo la meta el 80% de las veces.
+   Baja tras 21 días cumpliendo el piso menos de la mitad de las veces. */
+const VENTANA = 21, PARA_SUBIR = 0.80, PARA_BAJAR = 0.50;
+
+function diasEntre(a, b){
+  return Math.round((parseISO(b) - parseISO(a)) / 86400000);
+}
+
+function evaluarProgresion(S, hoy){
+  const avisos = [];
+
+  for(const h of S.habits){
+    const g = h.goal;
+    if(!g || !g.desde) continue;
+    if(diasEntre(g.desde, hoy) < VENTANA) continue;
+
+    let obligatorios = 0, llegoMeta = 0, llegoPiso = 0;
+    for(const d of Object.keys(S.marks)){
+      if(d < g.desde || d >= hoy) continue;
+      const m = S.marks[d][h.id];
+      if(!m || m === ST.BLUE) continue;
+      obligatorios++;
+      const v = S.values?.[d]?.[h.id];
+      const valor = (v != null) ? v : (m === ST.GREEN ? g.meta : 0);
+      if(valor >= g.meta) llegoMeta++;
+      if(valor >= g.piso) llegoPiso++;
+    }
+
+    if(obligatorios < 10){ continue; }      // muestra muy chica, no se decide nada
+
+    const antes = g.meta;
+    if(llegoMeta / obligatorios >= PARA_SUBIR && g.meta < g.tope){
+      g.meta = Math.min(g.meta + g.sube, g.tope);
+      g.piso = Math.round(g.meta * 0.6);
+      avisos.push({ habito:h.name, tipo:"sube", de:antes, a:g.meta, unidad:g.unidad });
+    } else if(llegoPiso / obligatorios < PARA_BAJAR){
+      g.meta = Math.max(g.meta - g.sube, g.sube);
+      g.piso = Math.round(g.meta * 0.6);
+      avisos.push({ habito:h.name, tipo:"baja", de:antes, a:g.meta, unidad:g.unidad });
+    }
+    g.desde = hoy;                          // la ventana siempre se reinicia
+  }
+
+  if(avisos.length) save();
+  return avisos;
+}
+
+/* Un toque = cumplí la meta. Toque largo = poner el valor real. */
+function setValor(S, date, hid, valor){
+  const h = S.habits.find(x => x.id === hid);
+  if(!h?.goal) return;
+  if(!S.values) S.values = {};
+  if(!S.values[date]) S.values[date] = {};
+  S.values[date][hid] = valor;
+  setMark(date, hid, valor >= h.goal.piso ? ST.GREEN : ST.YELLOW);
+  if(Object.keys(S.values[date]).length === 0) delete S.values[date];
+  save();
+}
+
+/* ---- origen de las marcas: manual > import > cierre automático ---- */
+function originOf(S, date, hid){
+  const m = S.marks?.[date]?.[hid];
+  if(!m) return ORIGIN.NONE;
+  return (S.autoClosed?.[date] || []).includes(hid) ? ORIGIN.AUTO : ORIGIN.MANUAL;
+}
+function markAutoClosed(S, date, hid){
+  if(!S.autoClosed) S.autoClosed = {};
+  (S.autoClosed[date] = S.autoClosed[date] || []).push(hid);
+}
+function markManual(S, date, hid){
+  const a = S.autoClosed?.[date];
+  if(!a) return;
+  const i = a.indexOf(hid);
+  if(i >= 0) a.splice(i, 1);
+  if(a.length === 0) delete S.autoClosed[date];
+}
+
+/* ---- import desde Samsung Health ----
+   Trampas del archivo: línea 1 es metadata, BOM, coma sobrante al final de
+   cada fila, varias filas por día, y day_time se corta como TEXTO — nunca
+   new Date(), que reintroduce el bug de UTC. */
+function parseSamsungSteps(text){
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+  if(lines.length < 3) throw new Error("El archivo no tiene filas de datos.");
+  const head = lines[1].split(",");
+  const iDay = head.indexOf("day_time"), iCount = head.indexOf("count");
+  if(iDay < 0 || iCount < 0)
+    throw new Error("No parece el export de pasos. Buscá el archivo que termina en step_daily_trend.");
+  const byDay = {};
+  for(let i = 2; i < lines.length; i++){
+    const f = lines[i].split(",");
+    if(f.length < head.length) continue;
+    const date = (f[iDay] || "").slice(0, 10);
+    const n = parseInt(f[iCount], 10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(n)) continue;
+    byDay[date] = Math.max(byDay[date] || 0, n);
+  }
+  if(!Object.keys(byDay).length) throw new Error("No se encontró ningún día con pasos.");
+  return byDay;
+}
+
+function planStepImport(S, stepsByDay, today){
+  const targets = S.habits.filter(h => h.auto?.source === "steps");
+  const plan = [];
+  if(!targets.length) return plan;
+  const dates = Object.keys(stepsByDay).sort();
+
+  for(const h of targets){
+    const { threshold, near } = h.auto;
+    const floor = Math.round(threshold * (near ?? 0.9));
+    for(const date of dates){
+      if(date >= today) continue;                       // el día en curso no se toca
+      if(S.createdAt && date < S.createdAt) continue;
+      const steps = stepsByDay[date];
+      const from = S.marks?.[date]?.[h.id] || null;
+      const origin = originOf(S, date, h.id);
+
+      let to, why, ask = false;
+      if(steps >= threshold){ to = ST.GREEN; why = `${steps.toLocaleString("es-AR")} pasos`; }
+      else if(steps >= floor){ to = ST.GREEN; ask = true;
+        why = `${steps.toLocaleString("es-AR")} pasos — faltaron ${threshold - steps}`; }
+      else { to = ST.YELLOW; why = `${steps.toLocaleString("es-AR")} pasos`; }
+
+      if(to === from) continue;                         // idempotencia
+
+      if(origin === ORIGIN.MANUAL){
+        plan.push({ date, hid:h.id, from, to, steps, why, action:"informar", ask:false,
+                    note:"Lo marcaste vos. No se cambia." });
+        continue;
+      }
+      if(to === ST.YELLOW && prevIsYellow(date, h.id)){
+        ask = true; why += " — sería el segundo amarillo seguido";
+      }
+      plan.push({ date, hid:h.id, from, to, steps, why, action:"proponer", ask,
+                  note: origin === ORIGIN.AUTO ? "Lo había cerrado la app sola." : "Estaba sin marcar." });
+    }
+  }
+  return plan.sort((a,b) => a.date < b.date ? -1 : 1);
+}
+
+function applyStepImport(S, plan, accepted){
+  let n = 0;
+  for(const p of plan){
+    if(p.action !== "proponer") continue;
+    if(!accepted.has(p.date + "|" + p.hid)) continue;
+    setMark(p.date, p.hid, p.to);
+    markManual(S, p.date, p.hid);      // deja de ser del robot
+    n++;
+  }
+  save();
+  return n;
+}
+
+/* =========================================================================
    3. ARRANQUE
    ========================================================================= */
 let S = load();
 let TAB = "hoy";
 let cursor = { y: new Date().getFullYear(), m: new Date().getMonth() };
 let weekHabit = null;
+
+/* Enganche 1: migrar a v2 y revisar si alguna meta tiene que moverse */
+migrateV2(S, TODAY);
+save();
+let AVISOS = [];
+const avisosProgresion = evaluarProgresion(S, TODAY);
+if(avisosProgresion.length) mostrarAvisos(avisosProgresion);
+
+/* Los avisos se guardan para pintarlos en Hoy y se anuncian con un toast */
+function mostrarAvisos(avisos){
+  AVISOS = avisos;
+  setTimeout(() => {
+    const a = avisos[0];
+    toast(`${a.habito} ${a.tipo} de ${a.de} a ${a.a} ${a.unidad}`);
+  }, 900);
+}
+
 const autoFilled = autoCloseDays();
 applyTheme();
 
@@ -498,13 +781,24 @@ function render(){
   window.scrollTo(0,0);
 }
 
+/* Avisos de progresión de metas, del enganche 1. Se muestran una sola vez. */
+function avisosHTML(){
+  if(!AVISOS.length) return "";
+  const li = AVISOS.map(a => `<b>${esc(a.habito)}</b> ${a.tipo} de ${a.de} a ${a.a} ${esc(a.unidad)}`).join("<br>");
+  return `<div class="alert good"><span class="ic">◆</span><div>
+    <b>${AVISOS.length===1?"Se movió una meta":"Se movieron "+AVISOS.length+" metas"}.</b><br>${li}</div></div>`;
+}
+
 /* ---------- HOY ---------- */
 function vHoy(){
   const d = new Date(), hs = habitsSorted(), free = isWeekend(TODAY);
   const c = countRange(d.getFullYear(), d.getMonth(), d.getDate(), d.getDate(), null);
   const risk = atRisk();
   const done = c.green, total = hs.length;
-  const mc = countRange(cursor.y, cursor.m, 1, daysInMonth(cursor.y,cursor.m), null);
+  /* Enganche 4: una sola pasada de stats() sobre el mes en curso */
+  const primerDiaDelMes = iso(new Date(cursor.y, cursor.m, 1));
+  const ultimoDiaDelMes = iso(new Date(cursor.y, cursor.m, daysInMonth(cursor.y, cursor.m)));
+  const r = stats(S, primerDiaDelMes, ultimoDiaDelMes);
 
   let alert = "";
   if(risk.length){
@@ -520,11 +814,14 @@ function vHoy(){
   const rows = hs.map(h => {
     const st = getMark(TODAY, h.id), k = streak(h.id);
     const danger = prevIsYellow(TODAY, h.id) && st !== ST.GREEN;
+    const g = h.goal, val = S.values?.[TODAY]?.[h.id];
+    /* Enganche 5: el hábito con meta acepta toque largo para el valor real */
+    const meta = g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
     return `<div class="hrow">
-      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}" aria-label="Marcar ${h.name}">${stGlyph(st)}</button>
+      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${h.name}">${stGlyph(st)}</button>
       <div class="hmeta">
         <div class="hname">${esc(h.name)}</div>
-        <div class="hsub"><span>${stName(st)}</span>${k>1?`<span>🔥 ${k} días</span>`:""}${danger?`<span class="warn">no podés fallar</span>`:""}</div>
+        <div class="hsub"><span>${stName(st)}</span>${meta}${k>1?`<span>🔥 ${k} días</span>`:""}${danger?`<span class="warn">no podés fallar</span>`:""}</div>
       </div>
       <button class="more" data-act="pick" data-h="${h.id}" aria-label="Elegir estado">⋯</button>
     </div>`;
@@ -538,11 +835,14 @@ function vHoy(){
     ${free ? `<div style="font-size:13px;color:var(--muted);margin-top:2px">Lo que no marques hoy queda en azul: no descuenta.</div>` : ""}
   </div>
   ${alert}
+  ${avisosHTML()}
   <div class="stats">
-    <div class="stat"><b style="color:var(--ok)">${mc.green}</b><span>Victorias</span></div>
-    <div class="stat"><b style="color:var(--fail)">${mc.yellow}</b><span>Derrotas</span></div>
-    <div class="stat"><b>${Math.max(...hs.map(h=>streak(h.id)), 0)}</b><span>Mejor racha</span></div>
+    <div class="stat"><b style="color:var(--ok)">${r.victorias}</b><span>Victorias</span></div>
+    <div class="stat"><b style="color:var(--fail)">${r.reglasRotas}</b><span>Reglas rotas</span></div>
+    <div class="stat"><b>${r.mejorRacha}</b><span>Mejor racha</span></div>
   </div>
+  ${r.tropiezos ? `<p style="font-size:12.5px;color:var(--muted);margin:-4px 0 12px;text-align:center">
+    ${r.tropiezos} ${r.tropiezos===1?"tropiezo suelto, no descuenta":"tropiezos sueltos, no descuentan"}</p>` : ""}
   <div class="card">${rows || `<p style="color:var(--muted);margin:0">No hay hábitos. Agregalos desde <b>Más</b>.</p>`}
     <div class="legend">
       <span><i style="background:var(--ok)"></i>Verde: lo hice</span>
@@ -653,6 +953,7 @@ function vMas(){
     <div class="srow"><span>Guardado</span><b style="font-size:13px;color:${memoryOnly?"var(--fail)":"var(--ok)"}">${memoryOnly?"solo en memoria":"en este dispositivo"}</b></div>
     <button class="btn" data-act="export">Exportar respaldo (.json)</button>
     <button class="btn ghost" data-act="import">Importar respaldo</button>
+    <button class="btn ghost" data-act="importPasos">Importar pasos (Samsung Health)</button>
     <button class="btn ghost danger" data-act="reset">Borrar todo</button>
     <p style="font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.5">
       El respaldo se descarga como archivo: guardalo en Google Drive desde el menú de compartir del celular.
@@ -674,6 +975,7 @@ function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt
 function bind(){
   view.querySelectorAll("[data-act]").forEach(el => el.addEventListener("click", onAct));
   view.querySelectorAll(".cell").forEach(el => el.addEventListener("click", () => openPicker(el.dataset.d, el.dataset.h)));
+  bindLongPress();
   const n = document.getElementById("note");
   if(n) n.addEventListener("input", e => { S.notes[TODAY] = e.target.value; save(); });
   ["newHabit","newLess","newMore"].forEach(id => {
@@ -687,10 +989,51 @@ function bind(){
   });
 }
 
+/* Enganche 5: toque largo sobre un hábito con meta -> cargar el valor real.
+   Un toque normal sigue siendo "cumplí la meta" y no pide ningún número. */
+let longPressFired = false;
+function bindLongPress(){
+  view.querySelectorAll('.dot[data-goal="1"]').forEach(el => {
+    let timer = null;
+    const start = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { longPressFired = true; valorSheet(TODAY, el.dataset.h); }, 500);
+    };
+    const cancel = () => clearTimeout(timer);
+    el.addEventListener("pointerdown", start);
+    el.addEventListener("pointerup", cancel);
+    el.addEventListener("pointerleave", cancel);
+    el.addEventListener("pointercancel", cancel);
+    el.addEventListener("contextmenu", e => e.preventDefault());
+  });
+}
+
+function valorSheet(date, hid){
+  const h = S.habits.find(x => x.id === hid);
+  if(!h?.goal) return;
+  const g = h.goal, actual = S.values?.[date]?.[hid];
+  sheet(`<h3>${esc(h.name)}</h3>
+    <p class="sub">Meta ${g.meta} ${esc(g.unidad)} · piso ${g.piso} ${esc(g.unidad)}. Abajo del piso queda amarillo.</p>
+    <input type="number" id="pv" inputmode="numeric" min="0" step="1" value="${actual != null ? actual : g.meta}">
+    <div class="row2"><button class="btn ghost" data-x="c" style="margin:0">Cancelar</button>
+    <button class="btn" data-x="o" style="margin:0">Guardar</button></div>`);
+  const inp = modal.querySelector("#pv");
+  inp.focus(); inp.select();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  const ok = () => {
+    const v = parseInt(inp.value, 10);
+    closeSheet();
+    if(Number.isFinite(v) && v >= 0){ setValor(S, date, hid, v); render(); }
+  };
+  modal.querySelector('[data-x="o"]').onclick = ok;
+  inp.addEventListener("keydown", e => { if(e.key === "Enter") ok(); });
+}
+
 function onAct(e){
   const el = e.currentTarget, a = el.dataset.act, hid = el.dataset.h;
   switch(a){
     case "quick": {
+      if(longPressFired){ longPressFired = false; break; }   // fue toque largo, no toque
       const st = getMark(TODAY, hid);
       if(st === ST.GREEN) applyMark(TODAY, hid, null);
       else applyMark(TODAY, hid, ST.GREEN);
@@ -717,22 +1060,27 @@ function onAct(e){
     case "tex": S.settings.texture = !S.settings.texture; save(); render(); break;
     case "export": doExport(); break;
     case "import": doImport(); break;
+    case "importPasos": doImportPasos(); break;
     case "reset": confirmSheet("¿Borrar todo?", "Se pierden hábitos, marcas y notas. No se puede deshacer.", "Borrar todo", () => {
         S = seed(); save(); cursor = { y:new Date().getFullYear(), m:new Date().getMonth() }; TAB = "hoy"; render();
       }); break;
   }
 }
 
-/* Aplica una marca respetando la regla de los 2 amarillos */
+/* Aplica una marca respetando la regla de los 2 amarillos.
+   Enganche 3: si la tocaste vos, la marca pasa a ser tuya y deja de ser
+   del cierre automático. Vale para Hoy y para las celdas de la rueda. */
 function applyMark(date, hid, st, skipCheck){
   if(st === ST.YELLOW && !skipCheck && prevIsYellow(date, hid)){
     const h = S.habits.find(x => x.id === hid);
     confirmSheet("⚠ Estás por romper la regla",
       `Este sería el 2º amarillo seguido en “${h.name}”. La regla del sistema es que nunca haya dos días fallados seguidos.`,
-      "Marcar igual", () => { setMark(date, hid, st); render(); });
+      "Marcar igual", () => { setMark(date, hid, st); markManual(S, date, hid); save(); render(); });
     return;
   }
   setMark(date, hid, st);
+  markManual(S, date, hid);
+  save();
   render();
 }
 
@@ -821,12 +1169,68 @@ function doImport(){
       try{
         const data = migrate(JSON.parse(r.result));
         if(!Array.isArray(data.habits)) throw new Error("formato");
+        migrateV2(data, TODAY);
         S = data; save(); autoCloseDays(); applyTheme(); render(); toast("Respaldo importado");
       }catch(e){ toast("Archivo inválido"); }
     };
     r.readAsText(f);
   };
   inp.click();
+}
+
+/* ---------- import de pasos (enganche 6) ----------
+   El CSV nunca sale del teléfono: se lee en memoria y se descarta. */
+function doImportPasos(){
+  if(!S.habits.some(h => h.auto?.source === "steps")){
+    toast("Ningún hábito está conectado a los pasos");
+    return;
+  }
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = ".csv,text/csv";
+  inp.onchange = () => {
+    const f = inp.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      let steps;
+      try{ steps = parseSamsungSteps(String(r.result)); }
+      catch(e){ toast(e.message); return; }
+      renderImportUI(planStepImport(S, steps, TODAY));
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+function renderImportUI(plan){
+  const prop = plan.filter(p => p.action === "proponer");
+  const info = plan.filter(p => p.action === "informar");
+  if(!prop.length && !info.length){ toast("Los pasos ya están al día"); return; }
+
+  const nombre = hid => esc(S.habits.find(h => h.id === hid)?.name || "");
+  const fila = p => `<label class="li" style="cursor:pointer">
+      <input type="checkbox" data-k="${p.date}|${p.hid}" ${p.ask ? "" : "checked"} style="width:auto;flex:none">
+      <span class="bar" style="background:${p.to === ST.GREEN ? "var(--ok)" : "var(--fail)"}"></span>
+      <span><b>${p.date}</b> · ${nombre(p.hid)}<br>
+        <small style="color:var(--muted)">${esc(p.why)} · ${esc(p.note)}</small></span></label>`;
+
+  sheet(`<h3>Importar pasos</h3>
+    <p class="sub">${prop.length} ${prop.length===1?"día para cambiar":"días para cambiar"}${info.length?` · ${info.length} que marcaste vos quedan intactos`:""}.
+      Los que faltaron pocos pasos vienen destildados.</p>
+    ${prop.length ? prop.map(fila).join("") : `<p style="color:var(--muted);font-size:13.5px">No hay nada para cambiar.</p>`}
+    ${info.length ? `<p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">
+      Sin tocar, porque los marcaste vos: ${info.map(p => esc(p.date)).join(", ")}</p>` : ""}
+    <div class="row2"><button class="btn ghost" data-x="c" style="margin:0">Cancelar</button>
+    <button class="btn" data-x="o" style="margin:0">Aplicar</button></div>`);
+
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const accepted = new Set();
+    modal.querySelectorAll('input[type=checkbox]').forEach(c => { if(c.checked) accepted.add(c.dataset.k); });
+    closeSheet();
+    const n = applyStepImport(S, plan, accepted);
+    render();
+    toast(n ? `${n} ${n===1?"día actualizado":"días actualizados"}` : "No se cambió nada");
+  };
 }
 
 /* ---------- nav ---------- */
@@ -885,7 +1289,8 @@ function showInstallBar(){
 function hideInstallBar(){ document.getElementById("installBar")?.remove(); }
 
 /* Expuesto para pruebas automatizadas */
-window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone };
+window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
+  /* v2 */ migrateV2, stats, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
 </script>
 </body>
 </html>

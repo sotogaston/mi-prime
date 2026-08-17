@@ -2,3 +2,8 @@ node_modules/
 shot-*.png
 demo-*.png
 *.log
+
+# Datos personales: respaldos de la app y exports de salud. Nunca al repo.
+mi-prime-*.json
+com_samsung_*.csv
+*.zip
