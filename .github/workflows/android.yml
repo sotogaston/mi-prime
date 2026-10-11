@@ -1,0 +1,66 @@
+# Pruebas de la app y APK de Android.
+# El APK sale SIN FIRMAR: la llave de firma no vive en GitHub (ver README, "App de Android").
+# Se baja el artefacto, se firma con apksigner (viene en el mismo artefacto) y se publica en descargas/.
+name: App de Android
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node test.mjs
+
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+      - name: Copiar la app al proyecto de Android
+        run: npm run android:sync
+      - name: Compilar
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Revisar el APK
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p salida
+          "$BT/zipalign" -f -p 4 "$APK" salida/mi-prime-sin-firmar.apk
+          "$BT/zipalign" -c -p 4 salida/mi-prime-sin-firmar.apk && echo "zipalign: ok"
+          cp "$BT/lib/apksigner.jar" salida/
+          "$BT/aapt2" dump badging salida/mi-prime-sin-firmar.apk | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission|application-label):"
+          echo "build-tools: $(basename "$BT")"
+          sha256sum salida/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mi-prime-sin-firmar
+          path: salida/
+          retention-days: 7

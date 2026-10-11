@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colores de Mi Prime para la barra de estado y los acentos del sistema -->
+    <color name="colorPrimary">#0D0D0D</color>
+    <color name="colorPrimaryDark">#0D0D0D</color>
+    <color name="colorAccent">#0CA30C</color>
+</resources>
