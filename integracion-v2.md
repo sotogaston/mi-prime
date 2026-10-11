@@ -35,7 +35,7 @@ const r = stats(S, primerDiaDelMes, ultimoDiaDelMes);
 // r.victorias    -> tarjeta 1  (verde)
 // r.reglasRotas  -> tarjeta 2  "REGLAS ROTAS", no "DERROTAS"
 // r.mejorRacha   -> tarjeta 3
-// r.tropiezos    -> texto gris chico: "15 tropiezos sueltos, no descuentan"
+// r.tropiezos    -> texto gris chico: "15 tropiezos sueltos: no rompen la regla, pero bajan el Prime %"
 // r.prime        -> centro de la rueda del mes (sin cambios: 75,7%)
 ```
 

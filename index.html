@@ -24,6 +24,7 @@
   --fail:#fab219; --fail-soft:#fdf1d8;
   --free:#2a78d6; --free-soft:#e4eefb;
   --empty:#eceae3;
+  --nodata:#a9a79f;
   --accent:#0b0b0b;
   --shadow:0 1px 2px rgba(11,11,11,.06),0 8px 24px rgba(11,11,11,.05);
 }
@@ -37,6 +38,7 @@
     --fail:#fab219; --fail-soft:#332713;
     --free:#3987e5; --free-soft:#132538;
     --empty:#2c2c2a;
+    --nodata:#6b6a65;
     --accent:#ffffff;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
   }
@@ -50,6 +52,7 @@
   --fail:#fab219; --fail-soft:#332713;
   --free:#3987e5; --free-soft:#132538;
   --empty:#2c2c2a;
+  --nodata:#6b6a65;
   --accent:#ffffff;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
 }
@@ -163,6 +166,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 .tbl .g{color:var(--ok);font-weight:700}
 .tbl .y{color:var(--fail);font-weight:700}
 .tbl .b{color:var(--free);font-weight:700}
+.tbl .n{color:var(--muted);font-weight:700}
 .tblscroll{overflow-x:auto}
 .tr-today{background:var(--surface-2)}
 
@@ -236,9 +240,12 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
    1. ESTADO Y PERSISTENCIA
    ========================================================================= */
 const KEY = "miPrime.v1";
-const ST = { GREEN:"green", YELLOW:"yellow", BLUE:"blue" };
+/* NODATA nunca se guarda: es como se lee el amarillo que puso el cierre
+   automático en un día hábil que nadie abrió (ver getMark). */
+const ST = { GREEN:"green", YELLOW:"yellow", BLUE:"blue", NODATA:"nodata" };
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const DIAS = ["dom","lun","mar","mié","jue","vie","sáb"];
+const DIAS_LARGOS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
 
 let memoryOnly = false;
 function load(){
@@ -291,7 +298,14 @@ function daysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
 const TODAY = iso(new Date());
 
 /* ---- lectura/escritura de marcas ---- */
-function getMark(date, hid){ return (S.marks[date] || {})[hid] || null; }
+/* Un día hábil que nadie abrió queda guardado como amarillo del cierre
+   automático, pero se lee como "sin dato": no es una falla registrada, es un
+   hueco. Así no hace falta migrar datos y el respaldo sigue siendo el mismo. */
+function getMark(date, hid){
+  const m = (S.marks[date] || {})[hid] || null;
+  if(m === ST.YELLOW && (S.autoClosed?.[date] || []).includes(hid)) return ST.NODATA;
+  return m;
+}
 function setMark(date, hid, st){
   if(!S.marks[date]) S.marks[date] = {};
   if(st === null) delete S.marks[date][hid];
@@ -306,7 +320,8 @@ function setMark(date, hid, st){
 
 /* Cierre automático del día:
    al abrir la app, todo día ya pasado que quedó sin marcar se resuelve solo.
-   Fin de semana -> azul (no era obligatorio). Día de semana -> amarillo. */
+   Fin de semana -> azul (no era obligatorio). Día de semana -> amarillo del
+   robot, que getMark() lee como "sin dato". */
 function autoCloseDays(){
   const yesterday = addDays(new Date(), -1);
   const start = S.settings.lastClosed ? addDays(parseISO(S.settings.lastClosed), 1) : parseISO(S.createdAt);
@@ -327,7 +342,8 @@ function autoCloseDays(){
   return filled;
 }
 
-/* Racha: verdes seguidos. El azul no suma pero tampoco corta. El amarillo corta. */
+/* Racha: verdes seguidos. El azul no suma pero tampoco corta. El amarillo
+   corta, y el sin dato también: ese día no se hizo. */
 function streak(hid){
   let n = 0;
   for(let i = 0; i < 400; i++){
@@ -342,31 +358,30 @@ function streak(hid){
   return n;
 }
 
-/* Regla dura: no se pueden tener 2 amarillos seguidos.
-   Devuelve true si el día anterior (sin contar azules) ya fue amarillo. */
-function prevIsYellow(date, hid){
+/* Último día obligatorio antes de `date`: los azules se saltean, hasta 7 días.
+   Cruza el mes sin problema porque mira el calendario, no un rango. */
+function prevDay(date, hid){
   for(let i = 1; i <= 7; i++){
-    const m = getMark(iso(addDays(parseISO(date), -i)), hid);
+    const ds = iso(addDays(parseISO(date), -i)), m = getMark(ds, hid);
     if(m === ST.BLUE) continue;
-    return m === ST.YELLOW;
+    return { date: ds, mark: m };
   }
-  return false;
+  return null;
 }
-/* Hábitos que hoy no pueden fallar */
-function atRisk(){ return S.habits.filter(h => prevIsYellow(TODAY, h.id) && getMark(TODAY,h.id) !== ST.GREEN); }
-/* Amarillos dobles ya registrados en el mes */
-function brokenRules(y,m){
-  let n = 0;
-  for(let d = 1; d <= daysInMonth(y,m); d++){
-    const ds = iso(new Date(y,m,d));
-    for(const h of S.habits) if(getMark(ds,h.id) === ST.YELLOW && prevIsYellow(ds,h.id)) n++;
-  }
-  return n;
+/* Regla dura: no se pueden tener 2 amarillos seguidos.
+   Devuelve true si el día anterior (sin contar azules) ya fue amarillo.
+   Un día vacío o sin dato corta la cadena: no es un amarillo. */
+function prevIsYellow(date, hid){ return prevDay(date, hid)?.mark === ST.YELLOW; }
+/* Hábitos que hoy no pueden fallar. En fin de semana no hay riesgo:
+   lo que no se marque queda azul. */
+function atRisk(){
+  if(isWeekend(TODAY)) return [];
+  return S.habits.filter(h => prevIsYellow(TODAY, h.id) && getMark(TODAY,h.id) !== ST.GREEN);
 }
 
 /* Conteos */
 function countRange(y, m, from, to, hid){
-  const out = { green:0, yellow:0, blue:0, empty:0 };
+  const out = { green:0, yellow:0, blue:0, nodata:0, empty:0 };
   const dim = daysInMonth(y,m);
   for(let d = from; d <= Math.min(to, dim); d++){
     const ds = iso(new Date(y,m,d));
@@ -376,6 +391,7 @@ function countRange(y, m, from, to, hid){
       if(mk === ST.GREEN) out.green++;
       else if(mk === ST.YELLOW) out.yellow++;
       else if(mk === ST.BLUE) out.blue++;
+      else if(mk === ST.NODATA) out.nodata++;
       else out.empty++;
     }
   }
@@ -390,7 +406,8 @@ function countRange(y, m, from, to, hid){
      · no se redeclara ST (ya existe arriba, con los mismos valores)
      · migrate() del módulo se llama acá migrateV2(), porque migrate() ya
        existe y normaliza el estado v1 en cada load()
-   Prime % no se toca: sigue siendo verdes/(verdes+amarillos).
+   Prime % = verdes/(verdes+amarillos+sin dato): el sin dato cuenta como
+   no hecho, aunque no sea una regla rota.
    ========================================================================= */
 const ORIGIN = { MANUAL:"manual", AUTO:"auto", NONE:"none" };
 
@@ -429,39 +446,41 @@ function migrateV2(S, hoy){
   return S;
 }
 
-/* ---- estadísticas: una sola pasada, todo lo que muestra la pantalla Hoy ----
-   Recorre el CALENDARIO, no las claves de marks, para que "dos amarillos
-   seguidos" signifique lo mismo acá que en prevIsYellow(): un día sin marcar
-   corta la cadena, el azul es transparente. */
+/* ---- estadísticas: una sola pasada, todo lo que muestran Hoy y Mes ----
+   Regla rota = amarillo con prevIsYellow(): la misma definición que el cartel
+   de riesgo y la confirmación del 2º amarillo, así que cruza el mes. */
 function stats(S, desde, hasta){
   const claves = Object.keys(S.marks).sort();
-  let victorias = 0, amarillos = 0, reglasRotas = 0, tropiezos = 0;
+  let victorias = 0, amarillos = 0, sinDato = 0, reglasRotas = 0, tropiezos = 0;
   let mejorRacha = 0, mejorLimpia = 0;
   const rotasPor = [];
   const ini = desde || claves[0], fin = hasta || claves[claves.length - 1];
 
   for(const h of (ini && fin ? S.habits : [])){
-    let previo = null;      // último estado obligatorio: el azul no cuenta
     let racha = 0, limpia = 0;
 
     for(let d = parseISO(ini); iso(d) <= fin; d = addDays(d,1)){
       const ds = iso(d);
-      const m = S.marks[ds]?.[h.id];
-      if(m === ST.BLUE) continue;             // el azul es transparente a todo
-      if(!m){ previo = null; continue; }       // sin marca: corta la cadena
+      const m = getMark(ds, h.id);
+      if(!m || m === ST.BLUE) continue;       // vacío y azul no cuentan
+
+      if(m === ST.NODATA){                    // no se hizo, pero no es una falla registrada
+        sinDato++;
+        racha = 0;
+        continue;
+      }
 
       if(m === ST.GREEN){
         victorias++;
         racha++;  limpia++;
         if(racha  > mejorRacha)  mejorRacha  = racha;
         if(limpia > mejorLimpia) mejorLimpia = limpia;
-        previo = ST.GREEN;
         continue;
       }
 
       amarillos++;
       racha = 0;                              // el amarillo siempre corta la racha
-      if(previo === ST.YELLOW){
+      if(prevIsYellow(ds, h.id)){
         reglasRotas++;
         limpia = 0;                           // solo la regla rota corta la limpia
         rotasPor.push({ fecha:ds, habito:h.name });
@@ -470,21 +489,24 @@ function stats(S, desde, hasta){
         limpia++;
         if(limpia > mejorLimpia) mejorLimpia = limpia;
       }
-      previo = ST.YELLOW;
     }
   }
 
-  const base = victorias + amarillos;
+  const base = victorias + amarillos + sinDato;
   return {
     victorias,
     reglasRotas,
     tropiezos,
     amarillos,
+    sinDato,
     prime: base ? Math.round(1000 * victorias / base) / 10 : 0,
     mejorRacha,
     mejorRachaLimpia: mejorLimpia,
     rotasPor
   };
+}
+function statsMes(y, m){
+  return stats(S, iso(new Date(y, m, 1)), iso(new Date(y, m, daysInMonth(y, m))));
 }
 
 /* ---- metas y progresión automática ----
@@ -507,8 +529,8 @@ function evaluarProgresion(S, hoy){
     let obligatorios = 0, llegoMeta = 0, llegoPiso = 0;
     for(const d of Object.keys(S.marks)){
       if(d < g.desde || d >= hoy) continue;
-      const m = S.marks[d][h.id];
-      if(!m || m === ST.BLUE) continue;
+      const m = getMark(d, h.id);
+      if(!m || m === ST.BLUE || m === ST.NODATA) continue;   // sin dato: no hay valor que medir
       obligatorios++;
       const v = S.values?.[d]?.[h.id];
       const valor = (v != null) ? v : (m === ST.GREEN ? g.meta : 0);
@@ -602,7 +624,7 @@ function planStepImport(S, stepsByDay, today){
       if(date >= today) continue;                       // el día en curso no se toca
       if(S.createdAt && date < S.createdAt) continue;
       const steps = stepsByDay[date];
-      const from = S.marks?.[date]?.[h.id] || null;
+      const from = getMark(date, h.id);                  // un sin dato no es igual a un amarillo
       const origin = originOf(S, date, h.id);
 
       let to, why, ask = false;
@@ -691,7 +713,8 @@ function sector(cx, cy, r0, r1, a0, a1){
        + ` L${x2.toFixed(2)},${y2.toFixed(2)} A${r0},${r0} 0 ${big} 0 ${x3.toFixed(2)},${y3.toFixed(2)} Z`;
 }
 function fillOf(st){
-  return st === ST.GREEN ? "var(--ok)" : st === ST.YELLOW ? "var(--fail)" : st === ST.BLUE ? "var(--free)" : "var(--empty)";
+  return st === ST.GREEN ? "var(--ok)" : st === ST.YELLOW ? "var(--fail)" : st === ST.BLUE ? "var(--free)"
+       : st === ST.NODATA ? "var(--nodata)" : "var(--empty)";
 }
 function texOf(st){
   if(!S.settings.texture) return null;
@@ -737,7 +760,7 @@ function monthWheel(y, m){
       stroke="var(--ink)" stroke-width="1.7" stroke-linejoin="round" opacity=".9"/>`;
   }
   const c = countRange(y,m,1,dim,null);
-  const oblig = c.green + c.yellow;
+  const oblig = c.green + c.yellow + c.nodata;   // el sin dato cuenta como no hecho
   const pct = oblig ? Math.round(c.green / oblig * 100) : 0;
   return `<svg viewBox="-14 -14 ${SZ+28} ${SZ+28}" role="img" aria-label="Rueda del mes">${DEFS}${cells}${tmark}${labs}
     <text class="ctr" x="${C}" y="${C-4}" text-anchor="middle" style="font-size:26px">${pct}%</text>
@@ -766,8 +789,14 @@ function weekWheel(y, m, from, to, hid, label){
 }
 
 function habitsSorted(){ return [...S.habits].sort((a,b)=>(a.order??0)-(b.order??0)); }
-function stName(st){ return st===ST.GREEN?"Hecho":st===ST.YELLOW?"No se hizo":st===ST.BLUE?"Libre":"Sin marcar"; }
-function stGlyph(st){ return st===ST.GREEN?"✓":st===ST.YELLOW?"✕":st===ST.BLUE?"–":"·"; }
+function stName(st){ return st===ST.GREEN?"Hecho":st===ST.YELLOW?"No se hizo":st===ST.BLUE?"Libre":st===ST.NODATA?"Sin dato":"Sin marcar"; }
+function stGlyph(st){ return st===ST.GREEN?"✓":st===ST.YELLOW?"✕":st===ST.BLUE?"–":st===ST.NODATA?"?":"·"; }
+/* "ayer", "el viernes" o "el lunes pasado": prevDay() nunca mira más de 7 días atrás */
+function diaRelativo(ds){
+  const n = diasEntre(ds, TODAY);
+  if(n === 1) return "ayer";
+  return "el " + DIAS_LARGOS[parseISO(ds).getDay()] + (n >= 7 ? " pasado" : "");
+}
 
 /* =========================================================================
    5. VISTAS
@@ -789,31 +818,46 @@ function avisosHTML(){
     <b>${AVISOS.length===1?"Se movió una meta":"Se movieron "+AVISOS.length+" metas"}.</b><br>${li}</div></div>`;
 }
 
+/* Tropiezos sueltos y sin dato no rompen la regla, pero sí bajan el Prime %:
+   los dos entran en el denominador. */
+function noRompen(tropiezos, sinDato){
+  const partes = [];
+  if(tropiezos) partes.push(tropiezos + (tropiezos===1 ? " tropiezo suelto" : " tropiezos sueltos"));
+  if(sinDato)   partes.push(sinDato + (sinDato===1 ? " sin dato (día hábil sin abrir la app)" : " sin dato (días hábiles sin abrir la app)"));
+  if(!partes.length) return "";
+  const uno = partes.length === 1 && tropiezos + sinDato === 1;
+  return `<p style="font-size:12.5px;color:var(--muted);margin:-4px 0 12px;text-align:center">
+    ${partes.join(" y ")}: ${uno ? "no rompe la regla, pero baja" : "no rompen la regla, pero bajan"} el Prime %</p>`;
+}
+
 /* ---------- HOY ---------- */
 function vHoy(){
   const d = new Date(), hs = habitsSorted(), free = isWeekend(TODAY);
   const c = countRange(d.getFullYear(), d.getMonth(), d.getDate(), d.getDate(), null);
   const risk = atRisk();
   const done = c.green, total = hs.length;
-  /* Enganche 4: una sola pasada de stats() sobre el mes en curso */
-  const primerDiaDelMes = iso(new Date(cursor.y, cursor.m, 1));
-  const ultimoDiaDelMes = iso(new Date(cursor.y, cursor.m, daysInMonth(cursor.y, cursor.m)));
-  const r = stats(S, primerDiaDelMes, ultimoDiaDelMes);
+  /* Enganche 4: una sola pasada de stats() sobre el mes en curso, no sobre
+     el que haya quedado abierto en Mes */
+  const r = statsMes(d.getFullYear(), d.getMonth());
 
   let alert = "";
   if(risk.length){
-    const names = risk.length > 3
-      ? esc(risk.slice(0,2).map(h=>h.name).join(", ")) + ` y ${risk.length-2} más`
-      : esc(risk.map(h=>h.name).join(", "));
+    /* El día que falló cada hábito: el lunes suele ser el viernes, no ayer */
+    const cuando = h => diaRelativo(prevDay(TODAY, h.id).date);
+    const dias = [...new Set(risk.map(cuando))];
+    const lista = arr => arr.length > 3 ? arr.slice(0,2).join(", ") + ` y ${arr.length-2} más` : arr.join(", ");
+    const detalle = dias.length === 1
+      ? `${dias[0][0].toUpperCase() + dias[0].slice(1)} ${risk.length===1?"quedó":"quedaron"} en amarillo: ${esc(lista(risk.map(h=>h.name)))}.`
+      : `Quedaron en amarillo: ${esc(lista(risk.map(h=>`${h.name} (${cuando(h)})`)))}.`;
     alert = `<div class="alert risk"><span class="ic">⚠</span><div><b>Hoy no podés fallar en ${risk.length===1?"1 hábito":risk.length+" hábitos"}.</b><br>
-      Ayer quedaron en amarillo: ${names}. Dos amarillos seguidos rompen la regla.</div></div>`;
+      ${detalle} Dos amarillos seguidos rompen la regla.</div></div>`;
   } else if(done === total && total > 0){
     alert = `<div class="alert good"><span class="ic">✓</span><div><b>Día completo.</b> Los ${total} hábitos en verde. Así se llega al prime.</div></div>`;
   }
 
   const rows = hs.map(h => {
     const st = getMark(TODAY, h.id), k = streak(h.id);
-    const danger = prevIsYellow(TODAY, h.id) && st !== ST.GREEN;
+    const danger = risk.includes(h);
     const g = h.goal, val = S.values?.[TODAY]?.[h.id];
     /* Enganche 5: el hábito con meta acepta toque largo para el valor real */
     const meta = g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
@@ -841,13 +885,13 @@ function vHoy(){
     <div class="stat"><b style="color:var(--fail)">${r.reglasRotas}</b><span>Reglas rotas</span></div>
     <div class="stat"><b>${r.mejorRacha}</b><span>Mejor racha</span></div>
   </div>
-  ${r.tropiezos ? `<p style="font-size:12.5px;color:var(--muted);margin:-4px 0 12px;text-align:center">
-    ${r.tropiezos} ${r.tropiezos===1?"tropiezo suelto, no descuenta":"tropiezos sueltos, no descuentan"}</p>` : ""}
+  ${noRompen(r.tropiezos, r.sinDato)}
   <div class="card">${rows || `<p style="color:var(--muted);margin:0">No hay hábitos. Agregalos desde <b>Más</b>.</p>`}
     <div class="legend">
       <span><i style="background:var(--ok)"></i>Verde: lo hice</span>
       <span><i style="background:var(--fail)"></i>Amarillo: no lo hice</span>
       <span><i style="background:var(--free)"></i>Azul: libre</span>
+      <span><i style="background:var(--nodata)"></i>Gris: sin dato</span>
     </div>
   </div>
   <div class="card">
@@ -860,7 +904,7 @@ function vHoy(){
 function vMes(){
   const {y,m} = cursor, dim = daysInMonth(y,m);
   const c = countRange(y,m,1,dim,null);
-  const rotos = brokenRules(y,m);
+  const r = statsMes(y,m), rotos = r.reglasRotas;
   const hs = habitsSorted();
   const ringKey = hs.map((h,i)=>`<div class="li"><span style="color:var(--muted);width:18px">${i+1}</span><span>${esc(h.name)}</span>
     <span style="color:var(--ok);font-weight:700">${countRange(y,m,1,dim,h.id).green}</span></div>`).join("");
@@ -872,6 +916,7 @@ function vMes(){
       <span><i style="background:var(--ok)"></i>Hecho</span>
       <span><i style="background:var(--fail)"></i>No se hizo</span>
       <span><i style="background:var(--free)"></i>Libre</span>
+      <span><i style="background:var(--nodata)"></i>Sin dato</span>
       <span><i style="background:var(--empty)"></i>Sin marcar</span>
     </div>
     <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0">
@@ -882,6 +927,7 @@ function vMes(){
     <div class="stat"><b style="color:var(--fail)">${c.yellow}</b><span>DER total</span></div>
     <div class="stat"><b class="${rotos?"danger":""}">${rotos}</b><span>Reglas rotas</span></div>
   </div>
+  ${noRompen(r.tropiezos, r.sinDato)}
   <div class="card"><div class="card-t">Anillos · victorias del mes</div>${ringKey}</div>`;
 }
 
@@ -929,7 +975,7 @@ function vMas(){
     const ds = iso(new Date(y,m,d));
     rows += `<tr class="${ds===TODAY?"tr-today":""}"><td>${d} ${DIAS[parseISO(ds).getDay()]}</td>` +
       hs.map(h=>{ const st = getMark(ds,h.id);
-        return `<td class="${st===ST.GREEN?"g":st===ST.YELLOW?"y":st===ST.BLUE?"b":""}">${stGlyph(st)}</td>`; }).join("") + `</tr>`;
+        return `<td class="${st===ST.GREEN?"g":st===ST.YELLOW?"y":st===ST.BLUE?"b":st===ST.NODATA?"n":""}">${stGlyph(st)}</td>`; }).join("") + `</tr>`;
   }
 
   return `
@@ -945,7 +991,7 @@ function vMas(){
   <div class="card"><div class="card-t">Historial · ${MESES[m]} ${y}</div>
     <div class="tblscroll"><table class="tbl"><thead><tr><th>Día</th>${hs.map((h,i)=>`<th title="${esc(h.name)}">${i+1}</th>`).join("")}</tr></thead>
     <tbody>${rows}</tbody></table></div>
-    <p style="font-size:12px;color:var(--muted);margin:8px 0 0">✓ hecho · ✕ no se hizo · – libre · · sin marcar</p>
+    <p style="font-size:12px;color:var(--muted);margin:8px 0 0">✓ hecho · ✕ no se hizo · – libre · ? sin dato · · sin marcar</p>
   </div>
   <div class="card"><div class="card-t">Ajustes</div>
     <div class="srow"><span>Texturas (daltonismo / impresión)</span>
@@ -1096,7 +1142,8 @@ function openPicker(date, hid){
   const cur = getMark(date, hid), d = parseISO(date);
   const opt = (st, cls, gl, t, sub) => `<button class="opt ${cur===st?"sel":""}" data-st="${st||""}">
     <i class="${cls}">${gl}</i><span><b>${t}</b><small>${sub}</small></span></button>`;
-  sheet(`<h3>${esc(h.name)}</h3><p class="sub">${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}</p>
+  sheet(`<h3>${esc(h.name)}</h3><p class="sub">${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}${
+      cur === ST.NODATA ? " · sin dato: ese día no se abrió la app" : ""}</p>
     ${opt(ST.GREEN,"i-green","✓","Verde","Lo hice")}
     ${opt(ST.YELLOW,"i-yellow","✕","Amarillo","No lo hice")}
     ${opt(ST.BLUE,"i-blue","–","Azul","Libre, no era obligatorio")}
@@ -1159,6 +1206,35 @@ function doExport(){
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   toast("Respaldo descargado");
 }
+/* Valida el respaldo entero antes de tocar nada. Devuelve el estado listo
+   para usar o tira un Error con el motivo; S y localStorage no se tocan. */
+function prepararRespaldo(texto){
+  let data;
+  try{ data = JSON.parse(texto); }catch(e){ throw new Error("No es un archivo JSON."); }
+  const esObj = x => x !== null && typeof x === "object" && !Array.isArray(x);
+  const esFecha = x => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
+  if(!esObj(data) || !Array.isArray(data.habits) || !esObj(data.marks))
+    throw new Error("No parece un respaldo de Mi Prime.");
+  if(!data.habits.every(h => esObj(h) && typeof h.name === "string" && h.name.trim()))
+    throw new Error("Hay hábitos sin nombre.");
+  if(!esFecha(data.createdAt)) throw new Error("Le falta la fecha de creación.");
+  const estados = new Set([ST.GREEN, ST.YELLOW, ST.BLUE]);
+  for(const [d, dia] of Object.entries(data.marks)){
+    if(!esFecha(d) || !esObj(dia) || !Object.values(dia).every(v => estados.has(v)))
+      throw new Error(`Marca inválida el ${d}.`);
+  }
+  const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj };
+  for(const [k, ok] of Object.entries(forma))
+    if(data[k] != null && !ok(data[k])) throw new Error(`El campo "${k}" está roto.`);
+  if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
+    throw new Error(`El campo "autoClosed" está roto.`);
+  if(data.settings?.lastClosed != null && !esFecha(data.settings.lastClosed))
+    throw new Error("La fecha del último cierre está rota.");
+  migrate(data);
+  migrateV2(data, TODAY);
+  return data;
+}
+
 function doImport(){
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "application/json,.json";
@@ -1166,12 +1242,19 @@ function doImport(){
     const f = inp.files[0]; if(!f) return;
     const r = new FileReader();
     r.onload = () => {
-      try{
-        const data = migrate(JSON.parse(r.result));
-        if(!Array.isArray(data.habits)) throw new Error("formato");
-        migrateV2(data, TODAY);
-        S = data; save(); autoCloseDays(); applyTheme(); render(); toast("Respaldo importado");
-      }catch(e){ toast("Archivo inválido"); }
+      let data;
+      try{ data = prepararRespaldo(String(r.result)); }
+      catch(e){ toast("Archivo inválido: " + e.message); return; }
+      const dias = o => Object.keys(o.marks).length;
+      confirmSheet("¿Reemplazar tus datos?",
+        `El respaldo trae ${data.habits.length} hábitos y ${dias(data)} días marcados (desde el ${data.createdAt}). `
+        + `Reemplaza lo que hay en este dispositivo: ${S.habits.length} hábitos y ${dias(S)} días marcados.`,
+        "Reemplazar", () => {
+          const previo = S;
+          try{ S = data; save(); autoCloseDays(); }
+          catch(e){ S = previo; save(); toast("No se pudo importar: tus datos quedaron como estaban"); return; }
+          applyTheme(); render(); toast("Respaldo importado");
+        });
     };
     r.readAsText(f);
   };
@@ -1289,8 +1372,8 @@ function showInstallBar(){
 function hideInstallBar(){ document.getElementById("installBar")?.remove(); }
 
 /* Expuesto para pruebas automatizadas */
-window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
-  /* v2 */ migrateV2, stats, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
+window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
+  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
 </script>
 </body>
 </html>
