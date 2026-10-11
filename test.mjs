@@ -554,7 +554,93 @@ console.log('\n== 24. La app abierta de un día para el otro ==');
   await c.close();
 }
 
-console.log('\n== 25. Capturas ==');
+console.log('\n== 25. Plan de avisos de la app de Android ==');
+{
+  const S = estado({ habits: [
+    { id: 'h1', name: 'Levantarme 07:00', order: 0, hora: '07:00' },
+    { id: 'h2', name: 'Tomar creatina', order: 1, hora: '07:00' },
+    { id: 'h3', name: 'Inglés', order: 2, hora: '21:30', hasta: '22:00' },
+    { id: 'h4', name: 'Dormir 7 hs', order: 3 }] });
+  const L = cargarLogica(S);
+  const fecha = a => L.iso(a.at), dia = a => a.at.getDay();
+  // Viernes 6/11 a las 06:00: el lunes 9/11 es feriado
+  const plan = L.planAvisos(S.habits, new Date(2026, 10, 6, 6, 0), 14, new Set());
+  ok('solo días hábiles: ni sábados ni domingos', plan.length > 0 && plan.every(a => dia(a) >= 1 && dia(a) <= 5));
+  ok('saltea los feriados (9/11 y 23/11 no avisan)', !plan.some(a => ['2026-11-09', '2026-11-23'].includes(fecha(a))));
+  ok('los hábitos a la misma hora van en un solo aviso', plan.filter(a => fecha(a) === '2026-11-06' && a.at.getHours() === 7)
+    .map(a => a.title).join() === 'Levantarme 07:00 · Tomar creatina');
+  ok('el hábito sin horario no avisa', !plan.some(a => a.title.includes('Dormir')));
+  ok('ids únicos y de 32 bits', new Set(plan.map(a => a.id)).size === plan.length && plan.every(a => Number.isInteger(a.id) && a.id < 2 ** 31));
+  ok('el texto dice el horario y qué hacer', plan.find(a => a.title === 'Inglés').body === '21:30–22:00 · Tocá para marcarlo');
+  // Hoy a las 08:00, con la creatina ya marcada: no avisa lo pasado ni lo hecho
+  const hoy = L.planAvisos(S.habits, new Date(2026, 9, 14, 8, 0), 1, new Set(['h3']));
+  ok('de hoy no avisa lo que ya pasó ni lo que ya marcaste', hoy.length === 0);
+  const hoy2 = L.planAvisos(S.habits, new Date(2026, 9, 14, 6, 0), 1, new Set(['h2']));
+  ok('si en un horario queda algo sin marcar, avisa solo eso', hoy2.find(a => a.at.getHours() === 7)?.title === 'Levantarme 07:00');
+}
+
+console.log('\n== 26. App de Android: avisos y respaldo ==');
+{
+  // Capacitor simulado: registra cada llamada a los plugins nativos
+  const capacitorFalso = () => {
+    window.__llamadas = []; window.__pendientes = [];
+    window.Capacitor = {
+      isNativePlatform: () => true, getPlatform: () => 'android',
+      nativePromise: async (plugin, metodo, op = {}) => {
+        window.__llamadas.push({ plugin, metodo, op: JSON.parse(JSON.stringify(op)) });
+        if (metodo === 'checkPermissions') return { display: 'granted' };
+        if (metodo === 'getPending') return { notifications: window.__pendientes.map(id => ({ id })) };
+        if (metodo === 'cancel') { window.__pendientes = []; return {}; }
+        if (metodo === 'schedule') { window.__pendientes.push(...op.notifications.map(n => n.id)); return { notifications: op.notifications.map(n => ({ id: n.id })) }; }
+        if (metodo === 'writeFile') return { uri: 'file:///data/cache/' + op.path };
+        return {};
+      }
+    };
+  };
+  const st = estado({ lastClosed: '2026-10-12', habits: [
+    { id: 'h1', name: 'Levantarme 07:00', order: 0, hora: '07:00' },
+    { id: 'h2', name: 'Meditar caminando', order: 1, hora: '07:15', hasta: '08:00' },
+    { id: 'h3', name: 'Magnesio', order: 2, hora: '22:30' },
+    { id: 'h4', name: 'Leer', order: 3, hora: '23:30' }] });
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c.clock.setFixedTime(new Date('2026-10-13T07:05:00'));          // martes 07:05
+  await c.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify(st));
+  await c.addInitScript(capacitorFalso);
+  const p = await c.newPage(); p.setDefaultTimeout(5000);
+  const errs = []; p.on('pageerror', e => errs.push(String(e)));
+  await p.goto(URL); await p.waitForTimeout(1200);
+  const llamadas = () => p.evaluate(() => window.__llamadas);
+  const ultimaAgenda = async () => (await llamadas()).filter(l => l.metodo === 'schedule').at(-1)?.op.notifications || [];
+  let ag = await ultimaAgenda();
+  const ll = await llamadas();
+  ok('pide permiso y crea el canal "Hábitos"', ll.some(l => l.metodo === 'checkPermissions') && ll.some(l => l.metodo === 'createChannel' && l.op.id === 'habitos' && l.op.importance === 4));
+  ok(`programa 14 días hábiles × 4 horarios, menos el de las 07:00 de hoy que ya pasó: 39 (obtuvo ${ag.length})`, ag.length === 39);
+  const primero = ag.slice().sort((a, b) => a.schedule.at.localeCompare(b.schedule.at))[0];
+  ok('el primero es hoy a las 07:15, en UTC exacto como lo lee Android', primero.title === 'Meditar caminando'
+    && primero.schedule.at === await p.evaluate(() => new Date(2026, 9, 13, 7, 15).toISOString()) && /\.\d{3}Z$/.test(primero.schedule.at));
+  ok('con alarma exacta aunque el celular esté en reposo, en el canal "Hábitos"', ag.every(n => n.schedule.allowWhileIdle && n.channelId === 'habitos'));
+  // Marcar Meditar: deja de avisar hoy a las 07:15 y se reprograma todo
+  await p.locator('.hrow', { hasText: 'Meditar caminando' }).locator('.dot').click(); await p.waitForTimeout(1200);
+  ag = await ultimaAgenda();
+  ok('al marcar un hábito, hoy ya no avisa (38)', ag.length === 38 && !ag.some(n => n.id === 715));
+  ok('y antes de reprogramar cancela los avisos anteriores', (await llamadas()).some(l => l.metodo === 'cancel' && l.op.notifications.length === 39));
+  await p.locator('nav button[data-tab="mas"]').click(); await p.waitForTimeout(1200);
+  const estadoAvisos = await p.locator('#avisosEstado').innerText();
+  ok('Más muestra cuántos avisos hay y cuándo es el próximo: ' + JSON.stringify(estadoAvisos), /38 avisos programados\. El próximo: hoy a las 22:30/.test(estadoAvisos));
+  ok('en la app no aparece el botón del calendario', await p.locator('[data-act="ics"]').count() === 0);
+  await p.locator('[data-act="probarAviso"]').click(); await p.waitForTimeout(200);
+  ok('"Probar un aviso" programa uno en 5 segundos', (await llamadas()).some(l => l.metodo === 'schedule' && l.op.notifications[0].id === 999999));
+  await p.locator('[data-act="export"]').click(); await p.waitForTimeout(300);
+  const ll2 = await llamadas();
+  const w = ll2.find(l => l.metodo === 'writeFile'), sh = ll2.find(l => l.metodo === 'share');
+  ok('exportar guarda el respaldo y abre "Compartir" (el WebView no baja archivos)',
+    w?.op.path === 'mi-prime-2026-10-13.json' && JSON.parse(w.op.data).habits.length === 4 && sh?.op.files?.[0] === 'file:///data/cache/mi-prime-2026-10-13.json');
+  ok('en la app no se registra el service worker', (await p.evaluate(() => navigator.serviceWorker.getRegistrations().then(r => r.length))) === 0);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 27. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

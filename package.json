@@ -10,6 +10,14 @@
     "serve": "node --eval \"import('node:http').then(async h=>{const{readFile}=await import('node:fs/promises');const{extname,resolve}=await import('node:path');const M={'.html':'text/html','.js':'text/javascript','.png':'image/png','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};h.createServer(async(q,s)=>{let p=q.url.split('?')[0];if(p==='/')p='/index.html';try{const b=await readFile(resolve(process.cwd(),'.'+p));s.writeHead(200,{'content-type':M[extname(p)]||'text/plain'}).end(b)}catch{s.writeHead(404).end()}}).listen(8080,()=>console.log('http://localhost:8080'))})\""
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.3",
     "playwright": "^1.49.0"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.4",
+    "@capacitor/local-notifications": "8.3.1",
+    "@capacitor/share": "8.0.3"
   }
 }

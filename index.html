@@ -244,6 +244,9 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
    1. ESTADO Y PERSISTENCIA
    ========================================================================= */
 const KEY = "miPrime.v1";
+/* ¿Corre como app de Android? La app (Capacitor) inyecta window.Capacitor antes que esta página. */
+const NATIVO = !!window.Capacitor?.isNativePlatform?.();
+let AVISOS_ESTADO = null, avisosTimer = null;   // avisos de la app (sección 8); render() ya los usa
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const DIAS = ["dom","lun","mar","mié","jue","vie","sáb"];
 const DIAS_LARGOS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
@@ -730,6 +733,35 @@ function pendientes(hoy){
   return null;
 }
 
+/* ---- avisos de la app de Android ----
+   Un aviso por horario (los hábitos a la misma hora van juntos) para los
+   próximos `dias` días, solo días hábiles: ni fines de semana ni feriados.
+   De hoy saltea lo que ya pasó y lo que ya está marcado. El id es único por
+   día y horario, y entra de sobra en 32 bits: día * 10000 + HHMM. */
+function planAvisos(habits, ahora, dias, hechosHoy){
+  const grupos = new Map();
+  for(const h of porHora(habits.filter(h => esHora(h.hora)))){
+    if(!grupos.has(h.hora)) grupos.set(h.hora, []);
+    grupos.get(h.hora).push(h);
+  }
+  const hoy = iso(ahora), out = [];
+  for(let i = 0; i < dias; i++){
+    const d = addDays(ahora, i), ds = iso(d);
+    if(esLibre(ds)) continue;
+    for(const [hora, hs] of grupos){
+      const [hh, mm] = hora.split(":").map(Number);
+      const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm);
+      if(at <= ahora) continue;
+      const faltan = ds === hoy ? hs.filter(h => !hechosHoy.has(h.id)) : hs;
+      if(!faltan.length) continue;
+      out.push({ id: i * 10000 + hh * 100 + mm, at,
+                 title: faltan.map(h => h.name).join(" · "),
+                 body: (faltan.length === 1 ? horario(faltan[0]) : hora) + " · Tocá para marcarlo" });
+    }
+  }
+  return out;
+}
+
 /* ---- recordatorios como calendario (.ics) ----
    Una PWA sin servidor no puede programar notificaciones con la app cerrada;
    un calendario sí. Un evento por horario (los hábitos a la misma hora van
@@ -947,6 +979,7 @@ function render(){
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
   window.scrollTo(0,0);
+  programarAvisosPronto();
 }
 
 /* Avisos de progresión de metas, del enganche 1. Se muestran una sola vez. */
@@ -1148,12 +1181,18 @@ function vMas(){
     <tbody>${rows}</tbody></table></div>
     <p style="font-size:12px;color:var(--muted);margin:8px 0 0">✓ hecho · ✕ no se hizo · – libre · ? sin dato · · sin marcar</p>
   </div>
+  ${NATIVO ? `<div class="card"><div class="card-t">Avisos en este celular</div>
+    <p id="avisosEstado" style="font-size:14.5px;margin:0 0 6px">${esc(textoAvisos())}</p>
+    <p style="font-size:12.5px;color:var(--muted);margin:0;line-height:1.5">A la hora de cada hábito, de lunes a viernes, sin feriados.
+      Lo que ya marcaste hoy no avisa. Si un aviso llega tarde: Ajustes del celular → Apps → Mi Prime → Batería → Sin restricciones.</p>
+    <button class="btn ghost" data-act="probarAviso">Probar un aviso (en 5 segundos)</button>
+  </div>` : ""}
   <div class="card"><div class="card-t">Ajustes</div>
     <div class="srow"><span>Texturas (daltonismo / impresión)</span>
       <button class="switch" data-act="tex" role="switch" aria-checked="${!!S.settings.texture}"></button></div>
     <div class="srow"><span>Guardado</span><b style="font-size:13px;color:${memoryOnly?"var(--fail)":"var(--ok)"}">${memoryOnly?"solo en memoria":"en este dispositivo"}</b></div>
-    <button class="btn" data-act="ics">Recordatorios en el calendario (.ics)</button>
-    <button class="btn ghost" data-act="export">Exportar respaldo (.json)</button>
+    ${NATIVO ? "" : `<button class="btn" data-act="ics">Recordatorios en el calendario (.ics)</button>`}
+    <button class="btn ${NATIVO ? "" : "ghost"}" data-act="export">Exportar respaldo (.json)</button>
     <button class="btn ghost" data-act="import">Importar respaldo</button>
     <button class="btn ghost" data-act="importPasos">Importar pasos (Samsung Health)</button>
     <button class="btn ghost danger" data-act="reset">Borrar todo</button>
@@ -1262,6 +1301,7 @@ function onAct(e){
       save(); render(); break;
     }
     case "ics": doICS(); break;
+    case "probarAviso": probarAviso(); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -1377,6 +1417,7 @@ function addListItem(kind){
 
 /* ---------- backup ---------- */
 function descargar(texto, nombre, tipo){
+  if(NATIVO){ compartirArchivo(texto, nombre); return; }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([texto], { type: tipo }));
   a.download = nombre;
@@ -1545,7 +1586,7 @@ if(autoFilled > 0){
    ========================================================================= */
 /* Solo sobre http/https. Abierta con doble clic (file://) la app funciona igual,
    simplemente sin caché offline. */
-if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+if(!NATIVO && "serviceWorker" in navigator && location.protocol.startsWith("http")){
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
@@ -1586,9 +1627,68 @@ function showInstallBar(){
 }
 function hideInstallBar(){ document.getElementById("installBar")?.remove(); }
 
+/* =========================================================================
+   8. APP DE ANDROID: avisos a la hora de cada hábito
+   -------------------------------------------------------------------------
+   Instalada como app (Capacitor), esta misma página programa avisos locales:
+   los da el propio celular a la hora exacta, sin internet ni servidor. Se
+   reprograman después de cada cambio para los próximos 14 días. Se habla con
+   los plugins por Capacitor.nativePromise, que trae la app: no hace falta
+   empaquetar nada. En la web NATIVO es false y nada de esto corre.
+   ========================================================================= */
+const nativo = (plugin, metodo, opciones = {}) => window.Capacitor.nativePromise(plugin, metodo, opciones);
+
+function programarAvisosPronto(){
+  if(!NATIVO) return;
+  clearTimeout(avisosTimer);
+  avisosTimer = setTimeout(programarAvisos, 600);
+}
+async function programarAvisos(){
+  try{
+    let perm = await nativo("LocalNotifications", "checkPermissions");
+    if(perm.display !== "granted") perm = await nativo("LocalNotifications", "requestPermissions");
+    if(perm.display !== "granted"){ AVISOS_ESTADO = { error: "La app no tiene permiso para avisar: activalo en Ajustes → Apps → Mi Prime → Notificaciones." }; return mostrarAvisos(); }
+    await nativo("LocalNotifications", "createChannel", { id: "habitos", name: "Hábitos", description: "Aviso a la hora de cada hábito",
+                                                          importance: 4, visibility: 1, vibration: true });
+    const { notifications: viejos = [] } = await nativo("LocalNotifications", "getPending");
+    if(viejos.length) await nativo("LocalNotifications", "cancel", { notifications: viejos.map(n => ({ id: n.id })) });
+    const hechos = new Set(S.habits.filter(h => getMark(TODAY, h.id)).map(h => h.id));
+    const plan = planAvisos(S.habits, new Date(), 14, hechos);
+    if(plan.length) await nativo("LocalNotifications", "schedule", { notifications: plan.map(a => ({
+      id: a.id, title: a.title, body: a.body, channelId: "habitos", autoCancel: true,
+      schedule: { at: a.at.toISOString(), allowWhileIdle: true } })) });
+    AVISOS_ESTADO = { cantidad: plan.length, proximo: plan[0] || null };
+  }catch(e){ AVISOS_ESTADO = { error: "No se pudieron programar los avisos: " + (e?.message || e) }; }
+  mostrarAvisos();
+}
+function textoAvisos(){
+  const e = AVISOS_ESTADO;
+  if(!e) return "Programando los avisos…";
+  if(e.error) return e.error;
+  if(!e.cantidad) return "No hay avisos: poné horario a tus hábitos (✎ en Mis hábitos).";
+  const p = e.proximo.at, dia = iso(p) === TODAY ? "hoy" : DIAS_LARGOS[p.getDay()] + " " + p.getDate();
+  return `${e.cantidad} avisos programados. El próximo: ${dia} a las ${String(p.getHours()).padStart(2,"0")}:${String(p.getMinutes()).padStart(2,"0")}.`;
+}
+function mostrarAvisos(){ const el = document.getElementById("avisosEstado"); if(el) el.textContent = textoAvisos(); }
+async function probarAviso(){
+  try{
+    await nativo("LocalNotifications", "schedule", { notifications: [{ id: 999999, title: "Mi Prime", body: "Así te va a avisar a la hora de cada hábito.",
+      channelId: "habitos", schedule: { at: new Date(Date.now() + 5000).toISOString(), allowWhileIdle: true } }] });
+    toast("Aviso en 5 segundos: podés bloquear el celular");
+  }catch(e){ toast("No se pudo programar el aviso"); }
+}
+/* Respaldo y archivos: el WebView no descarga blobs, así que se guardan en la
+   caché de la app y se abre "Compartir" (Drive, WhatsApp, Archivos…). */
+async function compartirArchivo(texto, nombre){
+  try{
+    const { uri } = await nativo("Filesystem", "writeFile", { path: nombre, data: texto, directory: "CACHE", encoding: "utf8" });
+    await nativo("Share", "share", { title: nombre, files: [uri], dialogTitle: "Guardar " + nombre });
+  }catch(e){ if(!/cancel/i.test(String(e?.message || e))) toast("No se pudo compartir el archivo"); }
+}
+
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
-  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
+  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
 </script>
 </body>
 </html>
