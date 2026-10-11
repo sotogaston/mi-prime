@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve, dirname, extname, normalize } from 'node:path';
+import { cargarLogica } from './cargar-logica.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let pass = 0, fail = 0;
@@ -29,6 +30,10 @@ const FILE_URL = pathToFileURL(resolve(HERE, 'index.html')).href;
 
 const browser = await chromium.launch(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {});
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+// Fecha fija: el cartel de riesgo depende del día de la semana, y la suite
+// tiene que dar lo mismo corrida un domingo que un miércoles.
+const HOY_FIJO = '2026-10-14';   // miércoles
+await ctx.clock.setFixedTime(new Date(HOY_FIJO + 'T12:00:00'));
 const page = await ctx.newPage();
 
 const errors = [];
@@ -72,6 +77,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(150);
 ok('banner de riesgo visible', (await page.locator('.alert.risk').count()) === 1);
 ok('banner nombra el hábito', (await page.locator('.alert.risk').innerText()).includes('Levantarme'));
+ok('banner dice "Ayer" cuando fue ayer', (await page.locator('.alert.risk').innerText()).includes('Ayer'));
 ok('prevIsYellow = true', await page.evaluate(() => window.__prime.prevIsYellow(window.__prime.iso(new Date()), window.__prime.S.habits[0].id)));
 
 // intentar marcar amarillo hoy -> debe pedir confirmación
@@ -133,15 +139,16 @@ const auto = await page.evaluate(() => {
   const res = { weekend: [], weekday: [] };
   for (let i = 1; i <= 8; i++) {
     const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = P.iso(d), mk = P.S.marks[ds][S.habits[0].id];
-    (d.getDay() === 0 || d.getDay() === 6 ? res.weekend : res.weekday).push(mk);
+    const ds = P.iso(d), h = S.habits[0].id;
+    (d.getDay() === 0 || d.getDay() === 6 ? res.weekend : res.weekday).push({ leido: P.getMark(ds, h), guardado: P.S.marks[ds][h] });
   }
   const today = P.iso(new Date());
   res.todayUntouched = !P.S.marks[today];
   return res;
 });
-ok('finde sin marcar -> azul', auto.weekend.length > 0 && auto.weekend.every(v => v === 'blue'));
-ok('día de semana sin marcar -> amarillo', auto.weekday.length > 0 && auto.weekday.every(v => v === 'yellow'));
+ok('finde sin marcar -> azul', auto.weekend.length > 0 && auto.weekend.every(v => v.leido === 'blue'));
+ok('día de semana sin abrir -> sin dato (guardado como amarillo del cierre automático)',
+  auto.weekday.length > 0 && auto.weekday.every(v => v.leido === 'nodata' && v.guardado === 'yellow'));
 ok('hoy no se auto-cierra', auto.todayUntouched);
 
 console.log('\n== 7. Rueda del mes ==');
@@ -227,7 +234,185 @@ ok('renderiza abierta desde el disco', (await local.locator('.hrow').count()) ==
 ok('sin errores por el service worker ausente: ' + JSON.stringify(localErr), localErr.length === 0);
 await local.close();
 
-console.log('\n== 14. Capturas ==');
+// ---------------------------------------------------------------------------
+// Escenarios aislados: cada uno en su propio contexto (localStorage y reloj
+// propios), con un estado armado a mano y una fecha fija.
+const estado = ({ marks = {}, createdAt = '2026-09-01', lastClosed = '2026-10-13', habits } = {}) => ({
+  version: 2, createdAt,
+  habits: habits || [{ id: 'hA', name: 'Leer', order: 0 }, { id: 'hB', name: 'Meditar', order: 1 }],
+  marks, autoClosed: {}, values: {}, notes: {}, doLess: [], doMore: [],
+  settings: { lastClosed, texture: false, theme: 'auto' }
+});
+async function abrirEn(fecha, st){
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c.clock.setFixedTime(new Date(fecha + 'T12:00:00'));
+  await c.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify(st));
+  const p = await c.newPage();
+  p.setDefaultTimeout(5000);
+  const errs = [];
+  p.on('pageerror', e => errs.push(String(e)));
+  await p.goto(URL);
+  await p.waitForTimeout(250);
+  return { p, c, errs };
+}
+const ir = async (p, tab) => { await p.locator(`nav button[data-tab="${tab}"]`).click(); await p.waitForTimeout(150); };
+const statN = (p, i) => p.locator('.stats .stat b').nth(i).innerText();
+const centroRueda = p => p.locator('.wheelwrap svg .ctr').first().textContent();
+
+console.log('\n== 14. Día hábil sin abrir = sin dato ==');
+{
+  // Creada el 01/10 y nunca abierta hasta el 14/10: el cierre automático resuelve del 1 al 13.
+  // Leer: verde a mano el 13. Meditar: amarillo a mano el 08 y el 12.
+  const { p, c, errs } = await abrirEn(HOY_FIJO, estado({ createdAt: '2026-10-01', lastClosed: null, marks: {
+    '2026-10-08': { hB: 'yellow' }, '2026-10-12': { hB: 'yellow' }, '2026-10-13': { hA: 'green' } } }));
+  const r = await p.evaluate(() => {
+    const P = window.__prime, S = P.S;
+    return { guardado: S.marks['2026-10-12'].hA, delRobot: (S.autoClosed['2026-10-12'] || []).includes('hA'),
+             leido: P.getMark('2026-10-12', 'hA'), finde: P.getMark('2026-10-11', 'hA') };
+  });
+  ok('se guarda como amarillo del cierre automático (sin migrar datos)', r.guardado === 'yellow' && r.delRobot);
+  ok('se lee como sin dato (obtuvo ' + r.leido + ')', r.leido === 'nodata');
+  ok('el fin de semana sigue en azul', r.finde === 'blue');
+  ok('Hoy: 0 reglas rotas con 15 huecos de días hábiles (obtuvo ' + await statN(p, 1) + ')', await statN(p, 1) === '0');
+  ok('amarillo y después sin dato (ayer) no dispara el cartel', await p.locator('.alert.risk').count() === 0);
+  ok('Hoy muestra los sin dato aparte', (await p.locator('#app').innerText()).includes('15 sin dato'));
+  await ir(p, 'mes');
+  ok('Mes: 0 reglas rotas (obtuvo ' + await statN(p, 2) + ')', await statN(p, 2) === '0');
+  ok('Prime % cuenta el sin dato como no hecho: 1 verde de 18 = 6%', await centroRueda(p) === '6%');
+  ok('celda sin dato en gris propio', await p.locator('.wheelwrap .cell[data-d="2026-10-12"][data-h="hA"]').getAttribute('fill') === 'var(--nodata)');
+  ok('la leyenda del mes explica el sin dato', (await p.locator('.legend').innerText()).includes('Sin dato'));
+  await ir(p, 'mas');
+  ok('tabla historial: glifo propio "?"', (await p.locator('.tbl tbody tr').nth(11).locator('td').nth(1).innerText()) === '?');
+
+  const prog = await p.evaluate(() => {
+    const P = window.__prime, S = P.S;
+    // 8 verdes, 4 amarillos a mano y 15 días sin dato desde el 02/09
+    S.habits.push({ id: 'hG', name: 'Inglés', order: 2, goal: { unidad: 'min', piso: 15, meta: 30, sube: 5, tope: 60, desde: '2026-09-01' } });
+    [...Array(8).fill('g'), ...Array(4).fill('y'), ...Array(15).fill('sd')].forEach((t, i) => {
+      const ds = P.iso(new Date(2026, 8, 2 + i));
+      (S.marks[ds] ||= {}).hG = t === 'g' ? 'green' : 'yellow';
+      if (t === 'sd') P.markAutoClosed(S, ds, 'hG');
+    });
+    const avisos = P.evaluarProgresion(S, '2026-10-14');
+    return { avisos: avisos.map(a => a.tipo), meta: S.habits.find(h => h.id === 'hG').goal.meta };
+  });
+  ok('evaluarProgresion ignora el sin dato: la meta no baja (avisos ' + JSON.stringify(prog.avisos) + ', meta ' + prog.meta + ')',
+    prog.avisos.length === 0 && prog.meta === 30);
+
+  const plan = await p.evaluate(() => {
+    const P = window.__prime, S = P.S;
+    S.habits.push({ id: 'hP', name: 'Caminar seguido', order: 3, auto: { source: 'steps', threshold: 6000, near: 0.9 } });
+    (S.marks['2026-10-12'] ||= {}).hP = 'yellow';
+    P.markAutoClosed(S, '2026-10-12', 'hP');
+    return P.planStepImport(S, { '2026-10-12': 2000 }, '2026-10-14').map(x => x.action + ':' + x.to);
+  });
+  ok('el import de pasos puede convertir un sin dato en amarillo real (' + plan.join() + ')', plan.join() === 'proponer:yellow');
+  ok('sin errores de consola: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 15. Reglas rotas: una sola definición, cruza el mes ==');
+{
+  // Leer: amarillo el 30/09 y el 01/10 (rompe la regla cruzando el mes).
+  // Meditar: amarillo el 06 y el 07/10 (rompe la regla dentro del mes).
+  const { p, c } = await abrirEn(HOY_FIJO, estado({ marks: {
+    '2026-09-30': { hA: 'yellow' }, '2026-10-01': { hA: 'yellow' },
+    '2026-10-06': { hB: 'yellow' }, '2026-10-07': { hB: 'yellow' } } }));
+  const hoy = await statN(p, 1);
+  await ir(p, 'mes');
+  const mes = await statN(p, 2);
+  ok(`Hoy y Mes cuentan lo mismo: 2 (Hoy ${hoy} · Mes ${mes})`, hoy === '2' && mes === '2');
+  await p.locator('[data-act="prevM"]').click(); await p.waitForTimeout(120);
+  await ir(p, 'hoy');
+  ok('Hoy cuenta el mes en curso aunque Mes haya quedado en septiembre (obtuvo ' + await statN(p, 1) + ')', await statN(p, 1) === '2');
+  await c.close();
+}
+
+console.log('\n== 16. Cartel "Hoy no podés fallar" ==');
+{
+  // Sábado 17/10 con el viernes en amarillo: lo que no se marque hoy queda azul.
+  const { p, c } = await abrirEn('2026-10-17', estado({ lastClosed: '2026-10-16', marks: { '2026-10-16': { hA: 'yellow' } } }));
+  ok('en fin de semana no hay cartel', await p.locator('.alert.risk').count() === 0);
+  ok('ni etiqueta "no podés fallar" en la fila', await p.locator('.hsub .warn').count() === 0);
+  await c.close();
+}
+{
+  // Lunes 19/10: viernes amarillo, sábado y domingo azules.
+  const { p, c } = await abrirEn('2026-10-19', estado({ lastClosed: '2026-10-18', marks: {
+    '2026-10-16': { hA: 'yellow' }, '2026-10-17': { hA: 'blue', hB: 'blue' }, '2026-10-18': { hA: 'blue', hB: 'blue' } } }));
+  const t = await p.locator('.alert.risk').innerText().catch(() => '');
+  ok('el lunes nombra el viernes, no "ayer": ' + JSON.stringify(t), /el viernes/i.test(t) && !/ayer/i.test(t));
+  await c.close();
+}
+{
+  // Lunes con un día distinto por hábito: Leer falló el viernes, Meditar el domingo (marcado a mano).
+  const { p, c } = await abrirEn('2026-10-19', estado({ lastClosed: '2026-10-18', marks: {
+    '2026-10-16': { hA: 'yellow' }, '2026-10-17': { hA: 'blue', hB: 'blue' }, '2026-10-18': { hA: 'blue', hB: 'yellow' } } }));
+  const t = await p.locator('.alert.risk').innerText().catch(() => '');
+  ok('con días distintos nombra el de cada hábito: ' + JSON.stringify(t), t.includes('Leer (el viernes)') && t.includes('Meditar (ayer)'));
+  await c.close();
+}
+
+console.log('\n== 17. Texto de tropiezos ==');
+{
+  // Leer: verde el 05/10 y un amarillo suelto el 06/10.
+  const { p, c } = await abrirEn(HOY_FIJO, estado({ marks: { '2026-10-05': { hA: 'green' }, '2026-10-06': { hA: 'yellow' } } }));
+  const t = await p.locator('#app').innerText();
+  ok('dice que el tropiezo baja el Prime %', t.includes('1 tropiezo suelto: no rompe la regla, pero baja el Prime %'));
+  ok('ya no dice "no descuenta"', !/no descuenta/.test(t));
+  await ir(p, 'mes');
+  ok('y efectivamente lo baja: Prime 50%', await centroRueda(p) === '50%');
+  await c.close();
+}
+
+console.log('\n== 18. Importar respaldo: valida antes de guardar ==');
+{
+  const { p, c } = await abrirEn(HOY_FIJO, estado({ marks: { '2026-10-05': { hA: 'green' } } }));
+  await ir(p, 'mas');
+  const guardado = () => p.evaluate(() => localStorage.getItem('miPrime.v1'));
+  const importar = async contenido => {
+    const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="import"]').click()]);
+    await fc.setFiles({ name: 'respaldo.json', mimeType: 'application/json', buffer: Buffer.from(contenido) });
+    await p.waitForTimeout(250);
+  };
+  const antes = await guardado();
+  const malos = [
+    ['un objeto vacío', '{}', 'No parece un respaldo de Mi Prime'],
+    ['algo que no es JSON', 'hola', 'No es un archivo JSON'],
+    ['una marca con un estado inventado', JSON.stringify(estado({ marks: { '2026-10-01': { hA: 'rojo' } } })), 'Marca inválida el 2026-10-01'],
+  ];
+  for (const [que, contenido, motivo] of malos) {
+    await importar(contenido);
+    const aviso = await p.evaluate(m => document.body.innerText.includes(m), motivo);
+    ok(`rechaza ${que}, dice por qué y no toca los datos`, aviso && (await guardado()) === antes);
+  }
+  const nuevo = JSON.stringify(estado({ habits: [{ id: 'h1', name: 'Uno', order: 0 }, { id: 'h2', name: 'Dos', order: 1 }, { id: 'h3', name: 'Tres', order: 2 }],
+                                        marks: { '2026-10-02': { h1: 'green' } } }));
+  await importar(nuevo);
+  ok('un respaldo válido pide confirmación antes de reemplazar', (await p.locator('.sheet').innerText().catch(() => '')).includes('Reemplazar'));
+  await p.locator('[data-x="c"]').click().catch(() => {}); await p.waitForTimeout(120);
+  ok('cancelar deja todo como estaba', (await guardado()) === antes);
+  await importar(nuevo);
+  await p.locator('[data-x="o"]').click().catch(() => {}); await p.waitForTimeout(200);
+  const final = await p.evaluate(() => JSON.parse(localStorage.getItem('miPrime.v1')).habits.map(h => h.name).join());
+  ok('confirmar reemplaza los datos (' + final + ')', final === 'Uno,Dos,Tres');
+  await c.close();
+}
+
+console.log('\n== 19. La lógica de index.html corre sola en Node ==');
+{
+  // Lo mismo que usa mi-prime-v2.pruebas.js: si alguien saca algo del bloque
+  // @logica o le mete una dependencia del navegador, falla acá.
+  const S = estado({ marks: { '2026-09-30': { hA: 'yellow' }, '2026-10-01': { hA: 'yellow' }, '2026-10-02': { hB: 'yellow' } } });
+  S.autoClosed = { '2026-10-02': ['hB'] };
+  let L = null, err = '';
+  try { L = cargarLogica(S); } catch (e) { err = String(e); }
+  ok('el bloque @logica se carga sin navegador ' + err, !!L && typeof L.stats === 'function' && L.ST?.NODATA === 'nodata');
+  const r = L?.stats(S, '2026-10-01', '2026-10-31');
+  ok('y cuenta igual que la app: 1 regla rota cruzando el mes, 1 sin dato', r?.reglasRotas === 1 && r?.sinDato === 1);
+}
+
+console.log('\n== 20. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
