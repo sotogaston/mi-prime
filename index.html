@@ -109,11 +109,15 @@ header{padding:calc(14px + env(safe-area-inset-top)) 0 8px}
 .hname{font-size:15.5px;font-weight:600;line-height:1.25}
 .hsub{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
 .hsub .warn{color:var(--fail);font-weight:700}
+.hsub .now{color:var(--ink);font-weight:700}
+.pq{width:36px;height:36px;min-width:36px;border-radius:11px;display:grid;place-items:center;font-weight:700;font-size:16px;border:1px solid var(--line);background:var(--surface-2)}
+.pq.ok{color:var(--ok)} .pq.no{color:var(--fail)}
+.linkbtn{font-size:13px;color:var(--ink-2);text-decoration:underline;padding:6px 0 0}
 .more{width:38px;height:38px;min-width:38px;border-radius:12px;display:grid;place-items:center;color:var(--muted);font-size:19px;border:1px solid transparent}
 .more:active{background:var(--surface-2);border-color:var(--line)}
 
 /* ---------- notes ---------- */
-textarea,input[type=text],input[type=number]{
+textarea,input[type=text],input[type=number],input[type=time]{
   width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:13px;
   padding:11px 12px;color:var(--ink);font:inherit;font-size:15px;resize:vertical}
 textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -261,6 +265,7 @@ function migrate(s){
   s.habits ||= []; s.marks ||= {}; s.notes ||= {};
   s.doLess ||= []; s.doMore ||= []; s.settings ||= {};
   s.autoClosed ||= {}; s.values ||= {};   // v2: quién escribió la marca y el valor real
+  s.feriados ||= []; s.laborables ||= []; // feriados propios y feriados que se trabajan (ver esLibre)
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
   return s;
@@ -276,6 +281,8 @@ function seed(){
     marks: {},
     autoClosed: {},
     values: {},
+    feriados: [],
+    laborables: [],
     notes: {},
     doLess: ["Usar el celu","Enojarme","Gastar sin pensar","Pensar en el tiempo"],
     doMore: ["Preguntar si no entiendo algo","Mejoras en la casa","Salir a caminar"],
@@ -307,6 +314,23 @@ function daysInMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
 
 const TODAY = iso(new Date());
 
+/* Feriados nacionales de Argentina en días hábiles (fecha efectiva, ya
+   trasladada) y no laborables. Fuente: argentina.gob.ar/jefatura/feriados-nacionales-2026,
+   Ley 27.399 y Decreto 1103/2026 (9/11, visita del Papa). Los de 2027 salen de
+   la regla de traslado y de la Pascua (28/3): confirmarlos cuando se publique
+   el calendario oficial. Un feriado se trata como fin de semana: no es
+   obligatorio y lo que no se marque queda azul. El usuario puede sumar días
+   (S.feriados) o decir que un feriado le toca trabajar (S.laborables). */
+const FERIADOS_AR = [
+  "2026-10-12","2026-11-09","2026-11-23","2026-12-07","2026-12-08","2026-12-25",
+  "2027-01-01","2027-02-08","2027-02-09","2027-03-24","2027-03-25","2027-03-26","2027-04-02",
+  "2027-05-25","2027-06-21","2027-07-09","2027-08-16","2027-10-11","2027-12-08"
+];
+function esFeriado(ds){
+  return (FERIADOS_AR.includes(ds) || (S.feriados || []).includes(ds)) && !(S.laborables || []).includes(ds);
+}
+function esLibre(ds){ return isWeekend(ds) || esFeriado(ds); }
+
 /* ---- lectura/escritura de marcas ---- */
 /* Un día hábil que nadie abrió queda guardado como amarillo del cierre
    automático, pero se lee como "sin dato": no es una falla registrada, es un
@@ -330,15 +354,15 @@ function setMark(date, hid, st){
 
 /* Cierre automático del día:
    al abrir la app, todo día ya pasado que quedó sin marcar se resuelve solo.
-   Fin de semana -> azul (no era obligatorio). Día de semana -> amarillo del
-   robot, que getMark() lee como "sin dato". */
+   Fin de semana o feriado -> azul (no era obligatorio). Día hábil -> amarillo
+   del robot, que getMark() lee como "sin dato". */
 function autoCloseDays(){
   const yesterday = addDays(new Date(), -1);
   const start = S.settings.lastClosed ? addDays(parseISO(S.settings.lastClosed), 1) : parseISO(S.createdAt);
   if(start > yesterday){ return 0; }
   let filled = 0;
   for(let d = start; d <= yesterday; d = addDays(d,1)){
-    const ds = iso(d), free = isWeekend(ds);
+    const ds = iso(d), free = esLibre(ds);
     for(const h of S.habits){
       if(!getMark(ds, h.id)){
         setMark(ds, h.id, free ? ST.BLUE : ST.YELLOW);
@@ -382,10 +406,10 @@ function prevDay(date, hid){
    Devuelve true si el día anterior (sin contar azules) ya fue amarillo.
    Un día vacío o sin dato corta la cadena: no es un amarillo. */
 function prevIsYellow(date, hid){ return prevDay(date, hid)?.mark === ST.YELLOW; }
-/* Hábitos que hoy no pueden fallar. En fin de semana no hay riesgo:
+/* Hábitos que hoy no pueden fallar. En fin de semana o feriado no hay riesgo:
    lo que no se marque queda azul. */
 function atRisk(){
-  if(isWeekend(TODAY)) return [];
+  if(esLibre(TODAY)) return [];
   return S.habits.filter(h => prevIsYellow(TODAY, h.id) && getMark(TODAY,h.id) !== ST.GREEN);
 }
 
@@ -670,6 +694,111 @@ function applyStepImport(S, plan, accepted){
   save();
   return n;
 }
+
+/* ---- horarios ----
+   Cada hábito puede tener h.hora ("07:15") y h.hasta ("08:00"). */
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+function esHora(x){ return typeof x === "string" && HORA.test(x); }
+function minutos(hhmm){ const [h,m] = hhmm.split(":").map(Number); return h*60 + m; }
+function horario(h){ return h.hora ? h.hora + (h.hasta ? "–" + h.hasta : "") : ""; }
+/* El día se lee de arriba abajo: primero los que tienen hora, después el resto en su orden */
+function porHora(habits){
+  return [...habits].sort((a,b) =>
+    (a.hora ? minutos(a.hora) : 1e4) - (b.hora ? minutos(b.hora) : 1e4) || (a.order ?? 0) - (b.order ?? 0));
+}
+/* ¿Estamos dentro del bloque del hábito? Sin "hasta" el bloque dura 15 minutos;
+   si "hasta" es menor que "hora", el bloque cruza la medianoche. */
+function esAhora(h, ahora){
+  if(!h.hora) return false;
+  const ini = minutos(h.hora);
+  let fin = h.hasta && h.hasta !== h.hora ? minutos(h.hasta) : ini + 15;
+  if(fin <= ini) fin += 1440;
+  return (ahora >= ini && ahora < fin) || (ahora + 1440 >= ini && ahora + 1440 < fin);
+}
+
+/* ---- lo que quedó sin marcar ----
+   Lo de anoche (magnesio, leer, acostarse) se confirma a la mañana siguiente,
+   pero a esa hora el cierre automático ya lo dejó en sin dato. Esto devuelve el
+   último día hábil, si fue hace 3 días o menos, con sus hábitos sin dato. */
+function pendientes(hoy){
+  for(let i = 1; i <= 3; i++){
+    const ds = iso(addDays(parseISO(hoy), -i));
+    if(esLibre(ds)) continue;
+    const hs = porHora(S.habits.filter(h => getMark(ds, h.id) === ST.NODATA));
+    return hs.length ? { date: ds, habits: hs } : null;
+  }
+  return null;
+}
+
+/* ---- recordatorios como calendario (.ics) ----
+   Una PWA sin servidor no puede programar notificaciones con la app cerrada;
+   un calendario sí. Un evento por horario (los hábitos a la misma hora van
+   juntos), de lunes a viernes, salteando feriados, con aviso al empezar.
+   Las horas llevan la zona horaria explícita: sin ella cada calendario las
+   interpreta a su manera. */
+function offsetDe(tz, fecha){                  // "GMT-03:00" -> "-0300"
+  const n = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
+    .formatToParts(fecha).find(p => p.type === "timeZoneName").value;
+  const m = /([+-])(\d{2}):(\d{2})/.exec(n);
+  return m ? m[1] + m[2] + m[3] : "+0000";
+}
+function generarICS(habits, desde, url, feriados, ahora, tz){
+  const grupos = new Map();
+  for(const h of porHora(habits.filter(h => esHora(h.hora)))){
+    if(!grupos.has(h.hora)) grupos.set(h.hora, []);
+    grupos.get(h.hora).push(h);
+  }
+  const libresSet = new Set(feriados);
+  let ini = parseISO(desde);
+  while(isWeekend(iso(ini)) || libresSet.has(iso(ini))) ini = addDays(ini, 1);   // el primer evento cae en día hábil
+  const dia = d => iso(d).replace(/-/g, "");
+  const hhmm = m => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0") + "00";
+  const texto = t => t.replace(/[\\;,]/g, c => "\\" + c).replace(/\r?\n|\r/g, "\\n");
+  const octetos = ch => { const c = ch.codePointAt(0); return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; };
+  const doblar = linea => {                 // RFC 5545: líneas de hasta 75 octetos
+    let out = "", tramo = "", n = 0, max = 75;
+    for(const ch of linea){
+      if(n + octetos(ch) > max){ out += tramo + "\r\n "; tramo = ""; n = 0; max = 74; }
+      tramo += ch; n += octetos(ch);
+    }
+    return out + tramo;
+  };
+  const libres = [...libresSet].filter(ds => ds >= iso(ini) && !isWeekend(ds)).sort();
+  const sello = (ahora || new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Mi Prime//Recordatorios//ES",
+             "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Mi Prime"];
+  /* Zona sin horario de verano (como Argentina): se describe entera. Con horario
+     de verano, se deja solo el nombre IANA, que los calendarios ya conocen. */
+  const enero = offsetDe(tz, new Date(ini.getFullYear(), 0, 15)), julio = offsetDe(tz, new Date(ini.getFullYear(), 6, 15));
+  if(enero === julio){
+    L.push("X-WR-TIMEZONE:" + tz, "BEGIN:VTIMEZONE", "TZID:" + tz, "BEGIN:STANDARD", "DTSTART:19700101T000000",
+           "TZOFFSETFROM:" + enero, "TZOFFSETTO:" + enero, "END:STANDARD", "END:VTIMEZONE");
+  }
+  const conZona = ";TZID=" + tz + ":";
+  for(const [hora, hs] of grupos){
+    const desdeMin = minutos(hora);
+    let finMin = Math.max(...hs.map(h => {
+      const f = esHora(h.hasta) && h.hasta !== hora ? minutos(h.hasta) : desdeMin + 15;
+      return f <= desdeMin ? f + 1440 : f;
+    }));
+    const finDia = finMin >= 1440 ? addDays(ini, 1) : ini;
+    finMin %= 1440;
+    const nombres = hs.map(h => h.name).join(" · ");
+    L.push("BEGIN:VEVENT",
+      "UID:mi-prime-" + hora.replace(":", "") + "@mi-prime",
+      "DTSTAMP:" + sello,
+      "DTSTART" + conZona + dia(ini) + "T" + hhmm(desdeMin),
+      "DTEND" + conZona + dia(finDia) + "T" + hhmm(finMin),
+      "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+    if(libres.length) L.push("EXDATE" + conZona + libres.map(ds => ds.replace(/-/g, "") + "T" + hhmm(desdeMin)).join(","));
+    L.push("SUMMARY:" + texto(nombres),
+      "DESCRIPTION:" + texto("Marcalo en Mi Prime: " + url),
+      "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + texto(nombres), "TRIGGER:PT0S", "END:VALARM",
+      "END:VEVENT");
+  }
+  L.push("END:VCALENDAR");
+  return L.map(doblar).join("\r\n") + "\r\n";
+}
 /* @logica:fin */
 
 /* =========================================================================
@@ -754,7 +883,7 @@ function monthWheel(y, m){
       const tx = texOf(st);
       cells += `<path class="cell" d="${sector(C,C,r0,r1,a0,a1)}" fill="${tx||fillOf(st)}" `
             + `stroke="var(--surface)" stroke-width="0.6" data-d="${ds}" data-h="${h.id}">`
-            + `<title>${d} · ${h.name} · ${stName(st)}</title></path>`;
+            + `<title>${d} · ${esc(h.name)} · ${stName(st)}</title></path>`;
     });
     if(d % 2 === 1 || dim <= 28 || d === todayD){
       const [lx,ly] = polar(C,C,R+11,(d-.5)*step);
@@ -800,6 +929,7 @@ function weekWheel(y, m, from, to, hid, label){
 function habitsSorted(){ return [...S.habits].sort((a,b)=>(a.order??0)-(b.order??0)); }
 function stName(st){ return st===ST.GREEN?"Hecho":st===ST.YELLOW?"No se hizo":st===ST.BLUE?"Libre":st===ST.NODATA?"Sin dato":"Sin marcar"; }
 function stGlyph(st){ return st===ST.GREEN?"✓":st===ST.YELLOW?"✕":st===ST.BLUE?"–":st===ST.NODATA?"?":"·"; }
+function cap(t){ return t[0].toUpperCase() + t.slice(1); }
 /* "ayer", "el viernes" o "el lunes pasado": prevDay() nunca mira más de 7 días atrás */
 function diaRelativo(ds){
   const n = diasEntre(ds, TODAY);
@@ -832,7 +962,7 @@ function avisosHTML(){
 function noRompen(tropiezos, sinDato){
   const partes = [];
   if(tropiezos) partes.push(tropiezos + (tropiezos===1 ? " tropiezo suelto" : " tropiezos sueltos"));
-  if(sinDato)   partes.push(sinDato + (sinDato===1 ? " sin dato (día hábil sin abrir la app)" : " sin dato (días hábiles sin abrir la app)"));
+  if(sinDato)   partes.push(sinDato + " sin dato (quedaron sin marcar)");
   if(!partes.length) return "";
   const uno = partes.length === 1 && tropiezos + sinDato === 1;
   return `<p style="font-size:12.5px;color:var(--muted);margin:-4px 0 12px;text-align:center">
@@ -841,7 +971,9 @@ function noRompen(tropiezos, sinDato){
 
 /* ---------- HOY ---------- */
 function vHoy(){
-  const d = new Date(), hs = habitsSorted(), free = isWeekend(TODAY);
+  const d = new Date(), hs = habitsSorted(), free = esLibre(TODAY);
+  const feriado = esFeriado(TODAY);
+  const ahora = d.getHours() * 60 + d.getMinutes();
   const c = countRange(d.getFullYear(), d.getMonth(), d.getDate(), d.getDate(), null);
   const risk = atRisk();
   const done = c.green, total = hs.length;
@@ -856,7 +988,7 @@ function vHoy(){
     const dias = [...new Set(risk.map(cuando))];
     const lista = arr => arr.length > 3 ? arr.slice(0,2).join(", ") + ` y ${arr.length-2} más` : arr.join(", ");
     const detalle = dias.length === 1
-      ? `${dias[0][0].toUpperCase() + dias[0].slice(1)} ${risk.length===1?"quedó":"quedaron"} en amarillo: ${esc(lista(risk.map(h=>h.name)))}.`
+      ? `${cap(dias[0])} ${risk.length===1?"quedó":"quedaron"} en amarillo: ${esc(lista(risk.map(h=>h.name)))}.`
       : `Quedaron en amarillo: ${esc(lista(risk.map(h=>`${h.name} (${cuando(h)})`)))}.`;
     alert = `<div class="alert risk"><span class="ic">⚠</span><div><b>Hoy no podés fallar en ${risk.length===1?"1 hábito":risk.length+" hábitos"}.</b><br>
       ${detalle} Dos amarillos seguidos rompen la regla.</div></div>`;
@@ -864,17 +996,28 @@ function vHoy(){
     alert = `<div class="alert good"><span class="ic">✓</span><div><b>Día completo.</b> Los ${total} hábitos en verde. Así se llega al prime.</div></div>`;
   }
 
-  const rows = hs.map(h => {
+  /* Lo del último día hábil que quedó sin marcar: se confirma acá, a la mañana */
+  const pend = pendientes(TODAY);
+  const pendHTML = !pend ? "" : `<div class="card"><div class="card-t">${cap(diaRelativo(pend.date))} quedó sin marcar</div>
+    ${pend.habits.map(h => `<div class="li"><span>${esc(h.name)}${h.hora ? ` <small style="color:var(--muted)">${h.hora}</small>` : ""}</span>
+      <button class="pq ok" data-act="pend" data-d="${pend.date}" data-h="${h.id}" data-st="${ST.GREEN}" aria-label="Lo hice: ${esc(h.name)}">✓</button>
+      <button class="pq no" data-act="pend" data-d="${pend.date}" data-h="${h.id}" data-st="${ST.YELLOW}" aria-label="No lo hice: ${esc(h.name)}">✕</button></div>`).join("")}
+    <p style="font-size:12.5px;color:var(--muted);margin:8px 0 0">Lo que no confirmes queda gris (sin dato).</p></div>`;
+
+  /* El día en orden de horario: arriba lo que toca primero */
+  const rows = porHora(hs).map(h => {
     const st = getMark(TODAY, h.id), k = streak(h.id);
     const danger = risk.includes(h);
+    const hora = h.hora ? `<span>${horario(h)}</span>` : "";
+    const ya = !free && st !== ST.GREEN && esAhora(h, ahora) ? `<span class="now">ahora</span>` : "";
     const g = h.goal, val = S.values?.[TODAY]?.[h.id];
     /* Enganche 5: el hábito con meta acepta toque largo para el valor real */
     const meta = g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
     return `<div class="hrow">
-      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${h.name}">${stGlyph(st)}</button>
+      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${esc(h.name)}">${stGlyph(st)}</button>
       <div class="hmeta">
         <div class="hname">${esc(h.name)}</div>
-        <div class="hsub"><span>${stName(st)}</span>${meta}${k>1?`<span>🔥 ${k} días</span>`:""}${danger?`<span class="warn">no podés fallar</span>`:""}</div>
+        <div class="hsub">${ya}${hora}<span>${stName(st)}</span>${meta}${k>1?`<span>🔥 ${k} días</span>`:""}${danger?`<span class="warn">no podés fallar</span>`:""}</div>
       </div>
       <button class="more" data-act="pick" data-h="${h.id}" aria-label="Elegir estado">⋯</button>
     </div>`;
@@ -883,11 +1026,14 @@ function vHoy(){
   return `
   <div class="card" style="padding:15px 16px">
     <div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">
-      ${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}${free ? " · fin de semana" : ""}</div>
+      ${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}${feriado ? " · feriado" : free ? " · fin de semana" : ""}</div>
     <div style="font-size:29px;font-weight:700;letter-spacing:-.03em;margin-top:2px">${done} de ${total} hoy</div>
     ${free ? `<div style="font-size:13px;color:var(--muted);margin-top:2px">Lo que no marques hoy queda en azul: no descuenta.</div>` : ""}
+    ${isWeekend(TODAY) ? "" : `<button class="linkbtn" data-act="feriado">${feriado
+      ? "¿Te toca trabajar? Tomalo como día hábil" : "¿Hoy es feriado? Tomalo como día libre"}</button>`}
   </div>
   ${alert}
+  ${pendHTML}
   ${avisosHTML()}
   <div class="stats">
     <div class="stat"><b style="color:var(--ok)">${r.victorias}</b><span>Victorias</span></div>
@@ -970,8 +1116,8 @@ function vMas(){
   const {y,m} = cursor, dim = daysInMonth(y,m), hs = habitsSorted();
   const habitRows = hs.map((h,i)=>`<div class="srow">
     <span class="drag" data-act="up" data-h="${h.id}" ${i===0?'style="opacity:.25"':""}>▲</span>
-    <span>${esc(h.name)}</span>
-    <button class="x" data-act="renameH" data-h="${h.id}" style="color:var(--muted);font-size:15px">✎</button>
+    <span>${esc(h.name)}${h.hora ? ` <small style="color:var(--muted)">${horario(h)}</small>` : ""}</span>
+    <button class="x" data-act="editH" data-h="${h.id}" aria-label="Editar ${esc(h.name)}" style="color:var(--muted);font-size:15px">✎</button>
     <button class="x" data-act="delH" data-h="${h.id}" style="color:var(--muted);font-size:17px">×</button></div>`).join("");
 
   const listRows = (arr, kind, color) => arr.map((t,i)=>`<div class="li">
@@ -1006,7 +1152,8 @@ function vMas(){
     <div class="srow"><span>Texturas (daltonismo / impresión)</span>
       <button class="switch" data-act="tex" role="switch" aria-checked="${!!S.settings.texture}"></button></div>
     <div class="srow"><span>Guardado</span><b style="font-size:13px;color:${memoryOnly?"var(--fail)":"var(--ok)"}">${memoryOnly?"solo en memoria":"en este dispositivo"}</b></div>
-    <button class="btn" data-act="export">Exportar respaldo (.json)</button>
+    <button class="btn" data-act="ics">Recordatorios en el calendario (.ics)</button>
+    <button class="btn ghost" data-act="export">Exportar respaldo (.json)</button>
     <button class="btn ghost" data-act="import">Importar respaldo</button>
     <button class="btn ghost" data-act="importPasos">Importar pasos (Samsung Health)</button>
     <button class="btn ghost danger" data-act="reset">Borrar todo</button>
@@ -1104,7 +1251,17 @@ function onAct(e){
         for(const d in S.marks) delete S.marks[d][hid];
         save(); render();
       }); break;
-    case "renameH": renameHabit(hid); break;
+    case "editH": editHabit(hid); break;
+    case "pend": applyMark(el.dataset.d, hid, el.dataset.st); break;
+    case "feriado": {
+      /* Alterna hoy entre libre y hábil: saca o agrega en la lista que corresponda */
+      const quitar = (arr, ds) => { const i = arr.indexOf(ds); if(i >= 0) arr.splice(i, 1); return i >= 0; };
+      S.feriados ||= []; S.laborables ||= [];
+      if(esFeriado(TODAY)){ quitar(S.feriados, TODAY); if(esFeriado(TODAY)) S.laborables.push(TODAY); }
+      else { quitar(S.laborables, TODAY); if(!esFeriado(TODAY)) S.feriados.push(TODAY); }
+      save(); render(); break;
+    }
+    case "ics": doICS(); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -1152,7 +1309,7 @@ function openPicker(date, hid){
   const opt = (st, cls, gl, t, sub) => `<button class="opt ${cur===st?"sel":""}" data-st="${st||""}">
     <i class="${cls}">${gl}</i><span><b>${t}</b><small>${sub}</small></span></button>`;
   sheet(`<h3>${esc(h.name)}</h3><p class="sub">${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}${
-      cur === ST.NODATA ? " · sin dato: ese día no se abrió la app" : ""}</p>
+      cur === ST.NODATA ? " · sin dato: quedó sin marcar ese día" : ""}</p>
     ${opt(ST.GREEN,"i-green","✓","Verde","Lo hice")}
     ${opt(ST.YELLOW,"i-yellow","✕","Amarillo","No lo hice")}
     ${opt(ST.BLUE,"i-blue","–","Azul","Libre, no era obligatorio")}
@@ -1167,16 +1324,6 @@ function confirmSheet(title, sub, okText, fn){
     <button class="btn" data-x="o" style="margin:0">${esc(okText)}</button></div>`);
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="o"]').onclick = () => { closeSheet(); fn(); };
-}
-function promptSheet(title, val, fn){
-  sheet(`<h3>${esc(title)}</h3><input type="text" id="pv" maxlength="42" value="${esc(val)}">
-    <div class="row2"><button class="btn ghost" data-x="c" style="margin:0">Cancelar</button>
-    <button class="btn" data-x="o" style="margin:0">Guardar</button></div>`);
-  const inp = modal.querySelector("#pv"); inp.focus(); inp.select();
-  modal.querySelector('[data-x="c"]').onclick = closeSheet;
-  const ok = () => { const v = inp.value.trim(); closeSheet(); if(v) fn(v); };
-  modal.querySelector('[data-x="o"]').onclick = ok;
-  inp.addEventListener("keydown", e => { if(e.key === "Enter") ok(); });
 }
 function toast(msg){
   const t = document.createElement("div");
@@ -1194,9 +1341,32 @@ function addHabit(){
   S.habits.push({ id: uid(), name: v, order: S.habits.length });
   save(); render();
 }
-function renameHabit(hid){
+/* Nombre y horario de lunes a viernes. El horario ordena Hoy y arma los recordatorios. */
+function editHabit(hid){
   const h = S.habits.find(x => x.id === hid); if(!h) return;
-  promptSheet("Renombrar hábito", h.name, v => { h.name = v; save(); render(); });
+  sheet(`<h3>Editar hábito</h3>
+    <input type="text" id="en" maxlength="42" value="${esc(h.name)}" aria-label="Nombre">
+    <p class="sub" style="margin:12px 0 6px">Horario de lunes a viernes (opcional): desde y hasta.</p>
+    <div class="row2"><input type="time" id="eh" value="${h.hora || ""}" aria-label="Desde">
+      <input type="time" id="ef" value="${h.hasta || ""}" aria-label="Hasta"></div>
+    <div class="row2"><button class="btn ghost" data-x="c" style="margin:0">Cancelar</button>
+    <button class="btn" data-x="o" style="margin:0">Guardar</button></div>`);
+  const $ = id => modal.querySelector(id);
+  $('[data-x="c"]').onclick = closeSheet;
+  const guardar = () => {
+    const nombre = $("#en").value.trim(), hora = $("#eh").value, hasta = $("#ef").value;
+    if(!nombre){ toast("El hábito necesita un nombre"); return; }
+    if(hasta && !hora){ toast("Poné primero la hora de inicio"); return; }
+    if((hora && !esHora(hora)) || (hasta && !esHora(hasta))){ toast("Escribí la hora como 07:30"); return; }
+    if(hasta && hasta === hora){ toast("El fin tiene que ser distinto del inicio"); return; }
+    h.name = nombre;
+    if(hora) h.hora = hora; else delete h.hora;
+    if(hora && hasta) h.hasta = hasta; else delete h.hasta;
+    closeSheet(); save(); render();
+  };
+  $('[data-x="o"]').onclick = guardar;
+  modal.querySelectorAll("input").forEach(i => i.addEventListener("keydown", e => { if(e.key === "Enter") guardar(); }));
+  $("#en").focus();
 }
 function addListItem(kind){
   const i = document.getElementById(kind === "less" ? "newLess" : "newMore"); if(!i) return;
@@ -1206,14 +1376,38 @@ function addListItem(kind){
 }
 
 /* ---------- backup ---------- */
-function doExport(){
-  const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
+function descargar(texto, nombre, tipo){
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `mi-prime-${TODAY}.json`;
+  a.href = URL.createObjectURL(new Blob([texto], { type: tipo }));
+  a.download = nombre;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function doExport(){
+  descargar(JSON.stringify(S, null, 2), `mi-prime-${TODAY}.json`, "application/json");
   toast("Respaldo descargado");
+}
+/* Recordatorios: un calendario que se importa una vez y avisa con la app cerrada */
+const ICS_PASOS = `<b>Google Calendar</b>, desde la compu: creá un calendario "Mi Prime" y poné su notificación
+  predeterminada en "Al momento del evento". Después: Configuración → Importar → este archivo → calendario "Mi Prime".
+  Si algún evento quedó sin aviso, abrí la serie y agregáselo. En el celular, dejá Google Calendar sin
+  restricción de batería. Para cambiar horarios: borrá el calendario e importá el archivo nuevo.<br>
+  <b>Despertarte y acostarte</b>: mejor con una alarma del Reloj, que suena aunque el teléfono esté en reposo.`;
+function doICS(){
+  const n = new Set(S.habits.filter(h => h.hora).map(h => h.hora)).size;
+  if(!n){ toast("Poné horario a algún hábito (✎ en Mis hábitos)"); return; }
+  const url = location.href.split(/[?#]/)[0];
+  const libres = [...FERIADOS_AR, ...(S.feriados || [])].filter(esFeriado);
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Argentina/Buenos_Aires";
+  let ics;
+  try{ ics = generarICS(S.habits, TODAY, url, libres, new Date(), tz); }
+  catch(e){ toast("Este navegador no pudo armar el calendario"); return; }
+  descargar(ics, "mi-prime-recordatorios.ics", "text/calendar");
+  sheet(`<h3>Recordatorios listos</h3>
+    <p class="sub">Se descargó <b>mi-prime-recordatorios.ics</b>: ${n} ${n===1?"aviso":"avisos"} de lunes a viernes, sin feriados.</p>
+    <p style="font-size:14px;line-height:1.5;margin:0 0 10px">${ICS_PASOS}</p>
+    <button class="btn" data-x="c" style="margin:0">Listo</button>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
 }
 /* Valida el respaldo entero antes de tocar nada. Devuelve el estado listo
    para usar o tira un Error con el motivo; S y localStorage no se tocan. */
@@ -1232,6 +1426,12 @@ function prepararRespaldo(texto){
     if(!esFecha(d) || !esObj(dia) || !Object.values(dia).every(v => estados.has(v)))
       throw new Error(`Marca inválida el ${d}.`);
   }
+  if(!data.habits.every(h => h.id == null || (typeof h.id === "string" && /^[\w-]+$/.test(h.id))))
+    throw new Error("Hay un hábito con un id inválido.");
+  if(!data.habits.every(h => (h.hora == null || esHora(h.hora)) && (h.hasta == null || esHora(h.hasta))))
+    throw new Error("Hay un horario mal escrito.");
+  for(const k of ["feriados", "laborables"])
+    if(data[k] != null && !(Array.isArray(data[k]) && data[k].every(esFecha))) throw new Error(`El campo "${k}" está roto.`);
   const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj };
   for(const [k, ok] of Object.entries(forma))
     if(data[k] != null && !ok(data[k])) throw new Error(`El campo "${k}" está roto.`);
@@ -1330,6 +1530,12 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b
 
 /* ---------- go ---------- */
 render();
+/* La PWA puede quedar abierta de un día para el otro (se marca a la noche y se
+   retoma a la mañana). Si cambió la fecha, se recarga: así corre el cierre
+   automático y las marcas van al día que corresponde. */
+document.addEventListener("visibilitychange", () => {
+  if(!document.hidden && iso(new Date()) !== TODAY) location.reload();
+});
 if(autoFilled > 0){
   setTimeout(() => toast(`Se cerraron ${autoFilled} marcas de días pasados`), 500);
 }
@@ -1382,7 +1588,7 @@ function hideInstallBar(){ document.getElementById("installBar")?.remove(); }
 
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
-  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
+  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
 </script>
 </body>
 </html>
