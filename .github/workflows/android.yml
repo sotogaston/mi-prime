@@ -78,11 +78,12 @@ jobs:
           mkdir -p salida
           if [ -n "$FIRMA" ]; then
             cp "$OUT/app-release.apk" salida/mi-prime.apk
-            java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs salida/mi-prime.apk > firma.txt
-            grep -E "^Verified using v[23]|Signer #1 certificate (DN|SHA-256)" firma.txt
+            java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs salida/mi-prime.apk > firma.txt 2>&1
+            grep -iE "^Verified using|certificate (DN|SHA-256 digest)" firma.txt
             # Siempre la misma llave: con otra, el APK no se instalaría encima del que ya está.
-            grep -q "Signer #1 certificate SHA-256 digest: $HUELLA" firma.txt \
-              || { echo "::error::El APK no está firmado con la llave de Mi Prime (huella distinta)."; exit 1; }
+            # (el texto antes de "certificate" cambia según la versión de apksigner)
+            grep -qi "certificate SHA-256 digest: $HUELLA" firma.txt \
+              || { cat firma.txt; echo "::error::El APK no está firmado con la llave de Mi Prime (huella distinta)."; exit 1; }
           else
             cp "$OUT/app-release-unsigned.apk" salida/mi-prime-sin-firmar.apk
             echo "::warning::Faltan los secretos ANDROID_FIRMA y ANDROID_CLAVE: el APK sale sin firmar y no se puede instalar."
