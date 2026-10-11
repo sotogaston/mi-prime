@@ -28,12 +28,12 @@ importás del otro lado.
 |---|---|---|
 | 🟢 Verde | Lo hice | Victoria (VIC) |
 | 🟡 Amarillo | No lo hice | Derrota (DER) |
-| 🔵 Azul | Libre, no era obligatorio | Neutro |
-| ⚪ Gris `?` | Sin dato: día hábil en que no se abrió la app | No hecho en el Prime %, pero no rompe la regla |
+| 🔵 Azul | Libre: fin de semana, feriado o día que no era obligatorio | Neutro |
+| ⚪ Gris `?` | Sin dato: día hábil que quedó sin marcar | No hecho en el Prime %, pero no rompe la regla |
 
 1. **Cierre automático del día.** Todo día ya pasado que quedó sin marcar se
-   resuelve solo al abrir la app: fin de semana → azul (no descuenta), día de
-   semana → **sin dato**. El día en curso nunca se auto-cierra. En el respaldo
+   resuelve solo al abrir la app: fin de semana o feriado → azul (no descuenta),
+   día hábil → **sin dato**. El día en curso nunca se auto-cierra. En el respaldo
    el sin dato se guarda como un amarillo anotado en `autoClosed` (lo puso la
    app, no vos); tocar la celda lo convierte en una marca tuya.
 2. **Nunca dos amarillos seguidos.** Es la regla dura. Al intentar marcar el 2º
@@ -49,14 +49,37 @@ importás del otro lado.
    sueltos (*tropiezos*) no rompen la regla, pero sí bajan el Prime %.
 5. **Metas.** La progresión automática ignora los días sin dato: no hay un valor
    real que medir.
+6. **Feriados.** Los nacionales de Argentina vienen cargados (2026 oficiales; los
+   de 2027 calculados por la Ley 27.399, a confirmar con el calendario oficial).
+   En Hoy, un botón toma el día como feriado o, si es feriado y te toca trabajar,
+   como día hábil.
+
+## Horarios y recordatorios
+
+Cada hábito puede tener horario de lunes a viernes (**Más → ✎**: desde y hasta).
+Con horario, **Hoy** se ordena por hora y marca el bloque de *ahora*.
+
+Una PWA sin servidor no puede programar notificaciones con la app cerrada, así
+que los avisos van por calendario: **Más → Recordatorios en el calendario** baja
+un `.ics` con un evento por horario (los hábitos a la misma hora van juntos), de
+lunes a viernes, sin feriados, con zona horaria explícita y el link a la app.
+Se importa en Google Calendar desde la compu, en un calendario propio con la
+notificación predeterminada "al momento del evento". Para despertarte y
+acostarte conviene además una alarma del Reloj: suena aunque el teléfono esté en
+reposo.
+
+Lo de la noche se confirma a la mañana: si el último día hábil (hasta 3 días
+atrás) quedó con hábitos sin marcar, Hoy los muestra con ✓ / ✕ antes de que
+queden en gris.
 
 ---
 
 ## Las cuatro pantallas
 
-- **Hoy** — checklist con un toque = verde. El `⋯` abre el selector de los tres
-  colores. Banner de alerta cuando un hábito viene de amarillo y hoy no puede
-  fallar (nunca en fin de semana). Nota del día.
+- **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
+  selector de los tres colores. Banner de alerta cuando un hábito viene de
+  amarillo y hoy no puede fallar (nunca en fin de semana ni feriado). Lo que
+  quedó sin marcar el último día hábil, para confirmarlo. Nota del día.
 - **Mes** — la rueda de 31 días: un anillo por hábito del centro hacia afuera, un
   sector por día, el día de hoy con contorno, Prime % en el centro. Las celdas se
   tocan para cambiarlas.
@@ -75,7 +98,7 @@ mi-prime/
 ├── manifest.webmanifest    nombre, íconos y modo standalone
 ├── sw.js                   service worker: caché offline
 ├── icons/                  192, 512 y maskable
-├── test.mjs                77 pruebas automatizadas (Playwright)
+├── test.mjs                105 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos

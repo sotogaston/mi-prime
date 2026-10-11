@@ -140,13 +140,13 @@ const auto = await page.evaluate(() => {
   for (let i = 1; i <= 8; i++) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = P.iso(d), h = S.habits[0].id;
-    (d.getDay() === 0 || d.getDay() === 6 ? res.weekend : res.weekday).push({ leido: P.getMark(ds, h), guardado: P.S.marks[ds][h] });
+    (P.esLibre(ds) ? res.weekend : res.weekday).push({ leido: P.getMark(ds, h), guardado: P.S.marks[ds][h] });
   }
   const today = P.iso(new Date());
   res.todayUntouched = !P.S.marks[today];
   return res;
 });
-ok('finde sin marcar -> azul', auto.weekend.length > 0 && auto.weekend.every(v => v.leido === 'blue'));
+ok('finde o feriado sin marcar -> azul', auto.weekend.length > 0 && auto.weekend.every(v => v.leido === 'blue'));
 ok('día de semana sin abrir -> sin dato (guardado como amarillo del cierre automático)',
   auto.weekday.length > 0 && auto.weekday.every(v => v.leido === 'nodata' && v.guardado === 'yellow'));
 ok('hoy no se auto-cierra', auto.todayUntouched);
@@ -267,22 +267,23 @@ console.log('\n== 14. Día hábil sin abrir = sin dato ==');
     '2026-10-08': { hB: 'yellow' }, '2026-10-12': { hB: 'yellow' }, '2026-10-13': { hA: 'green' } } }));
   const r = await p.evaluate(() => {
     const P = window.__prime, S = P.S;
-    return { guardado: S.marks['2026-10-12'].hA, delRobot: (S.autoClosed['2026-10-12'] || []).includes('hA'),
-             leido: P.getMark('2026-10-12', 'hA'), finde: P.getMark('2026-10-11', 'hA') };
+    return { guardado: S.marks['2026-10-09'].hA, delRobot: (S.autoClosed['2026-10-09'] || []).includes('hA'),
+             leido: P.getMark('2026-10-09', 'hA'), finde: P.getMark('2026-10-11', 'hA'), feriado: P.getMark('2026-10-12', 'hA') };
   });
   ok('se guarda como amarillo del cierre automático (sin migrar datos)', r.guardado === 'yellow' && r.delRobot);
   ok('se lee como sin dato (obtuvo ' + r.leido + ')', r.leido === 'nodata');
   ok('el fin de semana sigue en azul', r.finde === 'blue');
-  ok('Hoy: 0 reglas rotas con 15 huecos de días hábiles (obtuvo ' + await statN(p, 1) + ')', await statN(p, 1) === '0');
+  ok('el feriado del 12/10 se cierra en azul, no en sin dato', r.feriado === 'blue');
+  ok('Hoy: 0 reglas rotas con 14 huecos de días hábiles (obtuvo ' + await statN(p, 1) + ')', await statN(p, 1) === '0');
   ok('amarillo y después sin dato (ayer) no dispara el cartel', await p.locator('.alert.risk').count() === 0);
-  ok('Hoy muestra los sin dato aparte', (await p.locator('#app').innerText()).includes('15 sin dato'));
+  ok('Hoy muestra los sin dato aparte', (await p.locator('#app').innerText()).includes('14 sin dato'));
   await ir(p, 'mes');
   ok('Mes: 0 reglas rotas (obtuvo ' + await statN(p, 2) + ')', await statN(p, 2) === '0');
-  ok('Prime % cuenta el sin dato como no hecho: 1 verde de 18 = 6%', await centroRueda(p) === '6%');
-  ok('celda sin dato en gris propio', await p.locator('.wheelwrap .cell[data-d="2026-10-12"][data-h="hA"]').getAttribute('fill') === 'var(--nodata)');
+  ok('Prime % cuenta el sin dato como no hecho: 1 verde de 17 = 6%', await centroRueda(p) === '6%');
+  ok('celda sin dato en gris propio', await p.locator('.wheelwrap .cell[data-d="2026-10-09"][data-h="hA"]').getAttribute('fill') === 'var(--nodata)');
   ok('la leyenda del mes explica el sin dato', (await p.locator('.legend').innerText()).includes('Sin dato'));
   await ir(p, 'mas');
-  ok('tabla historial: glifo propio "?"', (await p.locator('.tbl tbody tr').nth(11).locator('td').nth(1).innerText()) === '?');
+  ok('tabla historial: glifo propio "?"', (await p.locator('.tbl tbody tr').nth(8).locator('td').nth(1).innerText()) === '?');
 
   const prog = await p.evaluate(() => {
     const P = window.__prime, S = P.S;
@@ -380,6 +381,7 @@ console.log('\n== 18. Importar respaldo: valida antes de guardar ==');
     ['un objeto vacío', '{}', 'No parece un respaldo de Mi Prime'],
     ['algo que no es JSON', 'hola', 'No es un archivo JSON'],
     ['una marca con un estado inventado', JSON.stringify(estado({ marks: { '2026-10-01': { hA: 'rojo' } } })), 'Marca inválida el 2026-10-01'],
+    ['un horario imposible', JSON.stringify(estado({ habits: [{ id: 'hA', name: 'Leer', order: 0, hora: '25:00' }] })), 'Hay un horario mal escrito'],
   ];
   for (const [que, contenido, motivo] of malos) {
     await importar(contenido);
@@ -412,7 +414,118 @@ console.log('\n== 19. La lógica de index.html corre sola en Node ==');
   ok('y cuenta igual que la app: 1 regla rota cruzando el mes, 1 sin dato', r?.reglasRotas === 1 && r?.sinDato === 1);
 }
 
-console.log('\n== 20. Capturas ==');
+console.log('\n== 20. Horarios: editar, ordenar el día y "ahora" ==');
+{
+  const { p, c } = await abrirEn(HOY_FIJO, estado());          // miércoles 12:00
+  await ir(p, 'mas');
+  const editar = async (hid, campos) => {
+    await p.locator(`[data-act="editH"][data-h="${hid}"]`).click();
+    for (const [sel, v] of Object.entries(campos)) await p.fill(sel, v);
+    await p.locator('[data-x="o"]').click(); await p.waitForTimeout(150);
+  };
+  await editar('hB', { '#en': 'Meditar caminando', '#eh': '07:15', '#ef': '08:00' });
+  await editar('hA', { '#eh': '11:30', '#ef': '12:30' });
+  const hs = await p.evaluate(() => window.__prime.S.habits.map(h => [h.name, h.hora, h.hasta].join('|')));
+  ok('guarda nombre y horario: ' + hs.join(' / '), hs.includes('Meditar caminando|07:15|08:00') && hs.includes('Leer|11:30|12:30'));
+  ok('Más muestra el horario', (await p.locator('#app').innerText()).includes('07:15–08:00'));
+  await ir(p, 'hoy');
+  const nombres = await p.locator('.hname').allInnerTexts();
+  ok('Hoy ordena por horario: ' + nombres.join(' → '), nombres[0] === 'Meditar caminando' && nombres[1] === 'Leer');
+  ok('marca el bloque de ahora (12:00 cae en 11:30–12:30)', (await p.locator('.now').count()) === 1 && (await p.locator('.hrow').nth(1).locator('.now').count()) === 1);
+  await ir(p, 'mas');
+  await p.locator('[data-act="editH"][data-h="hA"]').click();
+  await p.fill('#eh', ''); await p.fill('#ef', '09:00');
+  await p.locator('[data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('no acepta un "hasta" sin "desde"', (await p.evaluate(() => window.__prime.S.habits[0].hora)) === '11:30'
+    && (await p.evaluate(() => document.body.innerText.includes('Poné primero la hora de inicio'))));
+  await c.close();
+}
+
+console.log('\n== 21. Feriados ==');
+{
+  // Martes 13/10, último cierre el viernes 9: el lunes 12 fue feriado.
+  const { p, c } = await abrirEn('2026-10-13', estado({ lastClosed: '2026-10-09' }));
+  const r = await p.evaluate(() => { const P = window.__prime; return [P.getMark('2026-10-12', 'hA'), P.getMark('2026-10-11', 'hA')]; });
+  ok('el feriado del lunes 12/10 se cierra en azul, como el finde (obtuvo ' + r + ')', r[0] === 'blue' && r[1] === 'blue');
+  await c.close();
+}
+{
+  // El mismo lunes 12/10, abierto ese día, con el viernes en amarillo (el finde se cierra en azul al abrir)
+  const { p, c } = await abrirEn('2026-10-12', estado({ lastClosed: '2026-10-09', marks: { '2026-10-09': { hA: 'yellow' } } }));
+  const cab = await p.locator('.card').first().innerText();
+  ok('el feriado se anuncia como día libre: ' + JSON.stringify(cab.split('\n')[0]), /feriado/i.test(cab.split('\n')[0]) && cab.includes('queda en azul'));
+  ok('y no hay cartel de riesgo', await p.locator('.alert.risk').count() === 0);
+  await p.locator('[data-act="feriado"]').click(); await p.waitForTimeout(150);
+  ok('"me toca trabajar" lo vuelve día hábil, y vuelve el cartel',
+    await p.locator('.alert.risk').count() === 1 && await p.evaluate(() => !window.__prime.esLibre('2026-10-12')));
+  await c.close();
+}
+{
+  // Un miércoles común que el usuario declara feriado
+  const { p, c } = await abrirEn(HOY_FIJO, estado());
+  await p.locator('[data-act="feriado"]').click(); await p.waitForTimeout(150);
+  ok('"hoy es feriado" lo toma como día libre', await p.evaluate(() => window.__prime.esLibre('2026-10-14'))
+    && (await p.locator('.card').first().innerText()).includes('queda en azul'));
+  await c.close();
+}
+
+console.log('\n== 22. Lo de anoche se confirma a la mañana ==');
+{
+  // Miércoles 14/10: el martes se marcó Meditar y quedaron sin marcar Leer (23:30) y Magnesio (22:30).
+  const st = estado({ lastClosed: '2026-10-12', marks: { '2026-10-13': { hB: 'green' } }, habits: [
+    { id: 'hA', name: 'Leer', order: 0, hora: '23:30' }, { id: 'hB', name: 'Meditar', order: 1, hora: '07:15' },
+    { id: 'hC', name: 'Magnesio', order: 2, hora: '22:30' }] });
+  const { p, c } = await abrirEn(HOY_FIJO, st);
+  const card = p.locator('.card', { has: p.locator('.pq') });
+  const txt = await card.innerText().catch(() => '');
+  ok('aparece "Ayer quedó sin marcar"', /ayer quedó sin marcar/i.test(txt));
+  ok('con lo pendiente en orden de horario y sin lo ya marcado', /Magnesio[\s\S]*Leer/.test(txt) && !txt.includes('Meditar'));
+  await p.locator('[data-act="pend"][data-h="hC"][data-st="green"]').click(); await p.waitForTimeout(150);
+  await p.locator('[data-act="pend"][data-h="hA"][data-st="yellow"]').click(); await p.waitForTimeout(150);
+  const r = await p.evaluate(() => { const P = window.__prime;
+    return [P.getMark('2026-10-13', 'hC'), P.getMark('2026-10-13', 'hA'), P.originOf(P.S, '2026-10-13', 'hC')]; });
+  ok('✓ y ✕ lo pasan a verde y amarillo, como marca tuya (' + r + ')', r.join() === 'green,yellow,manual');
+  ok('y la tarjeta desaparece', await p.locator('.pq').count() === 0);
+  await c.close();
+}
+{
+  // Martes 13/10 después del lunes feriado: el viernes quedó 4 días atrás, ya no se pregunta.
+  const { p, c } = await abrirEn('2026-10-13', estado({ lastClosed: '2026-10-08' }));
+  ok('después de un finde largo no pregunta por el viernes', await p.locator('.pq').count() === 0);
+  await c.close();
+}
+
+console.log('\n== 23. Recordatorios en el calendario (.ics) ==');
+{
+  const st = estado({ habits: [
+    { id: 'h1', name: 'Levantarme 07:00', order: 0, hora: '07:00' },
+    { id: 'h2', name: 'Tomar creatina', order: 1, hora: '07:00' },
+    { id: 'h3', name: 'Inglés', order: 2, hora: '21:30', hasta: '22:00' },
+    { id: 'h4', name: 'Leer en la cama', order: 3, hora: '23:30', hasta: '23:45' },
+    { id: 'h5', name: 'Elegir bien con el azúcar', order: 4 }] });
+  const { p, c } = await abrirEn(HOY_FIJO, st);
+  await ir(p, 'mas');
+  const [dl] = await Promise.all([p.waitForEvent('download'), p.locator('[data-act="ics"]').click()]);
+  const ics = await readFile(await dl.path(), 'utf8');
+  const plano = ics.replace(/\r\n /g, '');                   // deshace el plegado de líneas
+  ok('se descarga mi-prime-recordatorios.ics', dl.suggestedFilename() === 'mi-prime-recordatorios.ics');
+  ok('un evento por horario: 3 (07:00 junta dos hábitos)', (ics.match(/BEGIN:VEVENT/g) || []).length === 3);
+  ok('07:00 agrupa levantarse y creatina', plano.includes('SUMMARY:Levantarme 07:00 · Tomar creatina'));
+  ok('de lunes a viernes', (ics.match(/RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR/g) || []).length === 3);
+  ok('arranca el miércoles 14/10, con zona horaria explícita', /DTSTART;TZID=[^:]+:20261014T070000/.test(plano));
+  ok('saltea los feriados (9/11 y 23/11)', /EXDATE;TZID=[^:]+:[^\r]*20261109T213000/.test(plano) && plano.includes('20261123T213000'));
+  ok('avisa al empezar cada evento', (ics.match(/TRIGGER:PT0S/g) || []).length === 3);
+  ok('líneas de 75 octetos como máximo y fin de línea CRLF',
+    ics.split('\r\n').every(l => Buffer.byteLength(l) <= 75) && !/[^\r]\n/.test(ics));
+  ok('el hábito sin horario no genera aviso', !plano.includes('azúcar'));
+  ok('explica cómo importarlo', (await p.locator('.sheet').innerText()).includes('Google Calendar'));
+  await c.close();
+  const L = cargarLogica(estado());
+  const cruza = L.generarICS([{ id: 'x', name: 'Tarde', hora: '23:30', hasta: '00:15' }], HOY_FIJO, 'u', [], new Date(), 'America/Argentina/Buenos_Aires');
+  ok('un bloque que cruza la medianoche termina al día siguiente', cruza.includes(':20261015T001500') && cruza.includes('TZOFFSETTO:-0300'));
+}
+
+console.log('\n== 24. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
