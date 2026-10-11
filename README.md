@@ -73,10 +73,11 @@ queden en gris.
 ## App de Android
 
 Es la misma `index.html` dentro de una app de [Capacitor](https://capacitorjs.com)
-(`android/`), con dos agregados que en la web no existen: **avisos programados**
+(`android/`), con tres agregados que en la web no existen: **avisos programados**
 (plugin Local Notifications, alarmas exactas, 14 días hacia adelante que se
-reprograman cada vez que marcás algo) y **exportar respaldo** con el menú de
-compartir (Drive, WhatsApp, mail).
+reprograman cada vez que marcás algo), **pasos de Health Connect** (plugin
+capacitor-health, ver *Pasos*) y **exportar respaldo** con el menú de compartir
+(Drive, WhatsApp, mail). Necesita Android 8.0 o más.
 
 Instalarla:
 
@@ -108,7 +109,33 @@ En una compu con el SDK de Android también se compila firmado con
 
 ---
 
-## Las cuatro pantallas
+## Pasos
+
+La pestaña **Pasos** muestra los pasos por día, semana (lunes a domingo), mes y
+año, como Samsung Health: el total, el promedio diario, los días que llegaste a
+la meta y el mejor día, con un gráfico de barras (verde = llegó a la meta) y la
+tabla de números. La meta es la del hábito conectado a los pasos (*Caminar
+seguido*, 6.000).
+
+- **En la app de Android** se leen solos de **Health Connect**, donde Samsung
+  Health comparte los pasos (Samsung Health → Ajustes → Health Connect → que
+  pueda escribir *Pasos*). La primera vez se toca **Conectar con Health
+  Connect** y se da el permiso, que es solo de pasos. Se actualizan al abrir la
+  app, al volver a ella y al entrar a Pasos; Health Connect deja traer hasta 30
+  días anteriores al permiso.
+- **En la web** se carga el CSV de Samsung Health (`…step_daily_trend…csv`).
+  Sirve también en la app para traer el historial más viejo.
+
+Los pasos se guardan por día en el teléfono y viajan en el respaldo. Health
+Connect manda (si Samsung Health recalcula un día, se corrige); el CSV solo
+completa o sube. El promedio cuenta los días con dato y deja afuera el día en
+curso, que todavía suma. Con los pasos guardados, la app propone marcar
+*Caminar seguido* en los días que falten, con la misma hoja de revisión del
+import. Qué datos lee y dónde quedan: [`privacidad.html`](privacidad.html).
+
+---
+
+## Las cinco pantallas
 
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
@@ -119,6 +146,7 @@ En una compu con el SDK de Android también se compila firmado con
   tocan para cambiarlas.
 - **Semanas** — la planilla semanal: un hábito por vez en bloques 1-7 / 8-14 /
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
+- **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
 - **Más** — hábitos (alta, edición, orden), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
 
@@ -135,7 +163,8 @@ mi-prime/
 ├── android/                la app de Android (Capacitor); android:sync copia la web adentro
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
-├── test.mjs                135 pruebas automatizadas (Playwright)
+├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
+├── test.mjs                186 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos (web y Android)
