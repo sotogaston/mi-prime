@@ -114,17 +114,22 @@ En una compu con el SDK de Android también se compila firmado con
 La pestaña **Pasos** muestra los pasos por día, semana (lunes a domingo), mes y
 año, como Samsung Health: el total, el promedio diario, los días que llegaste a
 la meta y el mejor día, con un gráfico de barras (verde = llegó a la meta) y la
-tabla de números. La meta es la del hábito conectado a los pasos (*Caminar
-seguido*, 6.000).
+tabla de números. La meta diaria es una sola (8.000 si no se cambió; *Meta
+diaria · Cambiar* debajo del gráfico) y es también la que marca *Caminar
+seguido*.
 
 - **En la app de Android** se leen solos de **Health Connect**, donde Samsung
   Health comparte los pasos (Samsung Health → Ajustes → Health Connect → que
   pueda escribir *Pasos*). La primera vez se toca **Conectar con Health
   Connect** y se da el permiso, que es solo de pasos. Se actualizan al abrir la
-  app, al volver a ella y al entrar a Pasos; Health Connect deja traer hasta 30
-  días anteriores al permiso.
-- **En la web** se carga el CSV de Samsung Health (`…step_daily_trend…csv`).
-  Sirve también en la app para traer el historial más viejo.
+  app, al volver a ella, al entrar a Pasos y cada 2 minutos con Pasos en
+  pantalla. Health Connect deja traer hasta 30 días anteriores al permiso (pedir
+  más atrás es un error), así que la primera lectura es de 29 días; si no
+  devuelve la suma por día, la app suma los registros de la app que más pasos
+  tiene. Si no hay nada, Pasos dice qué revisar y abre Health Connect.
+- **En la web** se carga el CSV de Samsung Health (`…step_daily_trend…csv`,
+  de Samsung Health → Ajustes → Descargar datos personales). En la app sirve
+  para traer el historial de antes de esos 30 días.
 
 Los pasos se guardan por día en el teléfono y viajan en el respaldo. Health
 Connect manda (si Samsung Health recalcula un día, se corrige); el CSV solo
@@ -164,7 +169,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                186 pruebas automatizadas (Playwright)
+├── test.mjs                197 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos (web y Android)
