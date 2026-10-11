@@ -98,7 +98,7 @@ mi-prime/
 ├── manifest.webmanifest    nombre, íconos y modo standalone
 ├── sw.js                   service worker: caché offline
 ├── icons/                  192, 512 y maskable
-├── test.mjs                105 pruebas automatizadas (Playwright)
+├── test.mjs                112 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos
