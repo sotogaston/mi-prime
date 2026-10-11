@@ -520,6 +520,10 @@ console.log('\n== 23. Recordatorios en el calendario (.ics) ==');
     { id: 'h5', name: 'Elegir bien con el azúcar', order: 4 }] });
   const { p, c } = await abrirEn(HOY_FIJO, st);
   await ir(p, 'mas');
+  const apk = p.locator('#bajarApk');
+  ok('en la web, Más ofrece bajar la app de Android', await apk.count() === 1
+    && await apk.getAttribute('href') === 'https://github.com/sotogaston/mi-prime/releases/download/android/mi-prime.apk');
+  ok('en la web no aparece la tarjeta de avisos del celular', await p.locator('#avisosEstado').count() === 0);
   const [dl] = await Promise.all([p.waitForEvent('download'), p.locator('[data-act="ics"]').click()]);
   const ics = await readFile(await dl.path(), 'utf8');
   const plano = ics.replace(/\r\n /g, '');                   // deshace el plegado de líneas
@@ -628,6 +632,7 @@ console.log('\n== 26. App de Android: avisos y respaldo ==');
   const estadoAvisos = await p.locator('#avisosEstado').innerText();
   ok('Más muestra cuántos avisos hay y cuándo es el próximo: ' + JSON.stringify(estadoAvisos), /38 avisos programados\. El próximo: hoy a las 22:30/.test(estadoAvisos));
   ok('en la app no aparece el botón del calendario', await p.locator('[data-act="ics"]').count() === 0);
+  ok('en la app no se ofrece bajar la app', await p.locator('#bajarApk').count() === 0);
   await p.locator('[data-act="probarAviso"]').click(); await p.waitForTimeout(200);
   ok('"Probar un aviso" programa uno en 5 segundos', (await llamadas()).some(l => l.metodo === 'schedule' && l.op.notifications[0].id === 999999));
   await p.locator('[data-act="export"]').click(); await p.waitForTimeout(300);

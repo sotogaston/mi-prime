@@ -179,7 +179,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 .srow:last-child{border-bottom:none}
 .srow span{flex:1;font-size:14.5px}
 .drag{color:var(--muted);font-size:15px;padding:4px}
-.btn{display:block;width:100%;padding:13px;border-radius:14px;background:var(--accent);color:var(--bg);font-weight:700;font-size:15px;text-align:center;margin-top:10px}
+.btn{display:block;width:100%;padding:13px;border-radius:14px;background:var(--accent);color:var(--bg);font-weight:700;font-size:15px;text-align:center;margin-top:10px;text-decoration:none}
 .btn.ghost{background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
 .switch{width:48px;height:28px;border-radius:999px;background:var(--empty);position:relative;transition:background .18s;flex:none}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:transform .18s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
@@ -246,6 +246,8 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
 const KEY = "miPrime.v1";
 /* ¿Corre como app de Android? La app (Capacitor) inyecta window.Capacitor antes que esta página. */
 const NATIVO = !!window.Capacitor?.isNativePlatform?.();
+/* La compila y la firma GitHub Actions en cada cambio de main (.github/workflows/android.yml). */
+const APK_URL = "https://github.com/sotogaston/mi-prime/releases/download/android/mi-prime.apk";
 let AVISOS_ESTADO = null, avisosTimer = null;   // avisos de la app (sección 8); render() ya los usa
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const DIAS = ["dom","lun","mar","mié","jue","vie","sáb"];
@@ -1186,13 +1188,17 @@ function vMas(){
     <p style="font-size:12.5px;color:var(--muted);margin:0;line-height:1.5">A la hora de cada hábito, de lunes a viernes, sin feriados.
       Lo que ya marcaste hoy no avisa. Si un aviso llega tarde: Ajustes del celular → Apps → Mi Prime → Batería → Sin restricciones.</p>
     <button class="btn ghost" data-act="probarAviso">Probar un aviso (en 5 segundos)</button>
-  </div>` : ""}
+  </div>` : `<div class="card"><div class="card-t">Avisos en el celular</div>
+    <p style="font-size:13.5px;margin:0;line-height:1.5">La app de Android avisa a la hora de cada hábito, aunque esté cerrada.
+      Antes de instalarla exportá el respaldo; después lo importás en la app.</p>
+    <a class="btn" id="bajarApk" href="${APK_URL}">Bajar la app de Android</a>
+  </div>`}
   <div class="card"><div class="card-t">Ajustes</div>
     <div class="srow"><span>Texturas (daltonismo / impresión)</span>
       <button class="switch" data-act="tex" role="switch" aria-checked="${!!S.settings.texture}"></button></div>
     <div class="srow"><span>Guardado</span><b style="font-size:13px;color:${memoryOnly?"var(--fail)":"var(--ok)"}">${memoryOnly?"solo en memoria":"en este dispositivo"}</b></div>
-    ${NATIVO ? "" : `<button class="btn" data-act="ics">Recordatorios en el calendario (.ics)</button>`}
-    <button class="btn ${NATIVO ? "" : "ghost"}" data-act="export">Exportar respaldo (.json)</button>
+    <button class="btn" data-act="export">Exportar respaldo (.json)</button>
+    ${NATIVO ? "" : `<button class="btn ghost" data-act="ics">Recordatorios en el calendario (.ics)</button>`}
     <button class="btn ghost" data-act="import">Importar respaldo</button>
     <button class="btn ghost" data-act="importPasos">Importar pasos (Samsung Health)</button>
     <button class="btn ghost danger" data-act="reset">Borrar todo</button>

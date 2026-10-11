@@ -3,7 +3,7 @@
    y se actualiza en segundo plano; el próximo arranque ya trae los cambios.
    Subí CACHE_VERSION cada vez que cambies index.html para forzar la limpieza. */
 
-const CACHE_VERSION = "mi-prime-v4";
+const CACHE_VERSION = "mi-prime-v5";
 const SHELL = [
   "./",
   "./index.html",

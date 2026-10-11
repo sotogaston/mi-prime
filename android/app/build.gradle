@@ -7,8 +7,10 @@ android {
         applicationId "com.sotogaston.miprime"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI pasa -PversionCode=<cantidad de commits>: cada versión es mayor y se instala encima de la anterior.
+        def numero = (project.findProperty('versionCode') ?: '1').toString()
+        versionCode = numero.toInteger()
+        versionName = "1.0.${numero}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
