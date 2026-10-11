@@ -41,6 +41,7 @@ jobs:
     env:
       FIRMA: ${{ secrets.ANDROID_FIRMA }}
       CLAVE: ${{ secrets.ANDROID_CLAVE }}
+      HUELLA: 430d91043cb28aabc5d3db93feb2a214842bc51bc67a152754d88868f85cf2f0   # SHA-256 del certificado
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,7 +61,11 @@ jobs:
       - name: Llave de firma
         if: env.FIRMA != ''
         run: |
-          echo "$FIRMA" | base64 -d > "$RUNNER_TEMP/mi-prime.p12"
+          # Tolera espacios o saltos de línea que se cuelan al pegar los secretos
+          printf %s "$FIRMA" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/mi-prime.p12"
+          CLAVE="$(printf %s "$CLAVE" | tr -d '[:space:]')"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/mi-prime.p12" -storepass "$CLAVE" -alias mi-prime > /dev/null \
+            || { echo "::error::ANDROID_FIRMA y ANDROID_CLAVE no abren la llave: volvé a copiarlos del documento de Drive."; exit 1; }
           printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=mi-prime\nkeyPassword=%s\n' \
             "$RUNNER_TEMP/mi-prime.p12" "$CLAVE" "$CLAVE" > android/keystore.properties
       - name: Compilar
@@ -73,8 +78,11 @@ jobs:
           mkdir -p salida
           if [ -n "$FIRMA" ]; then
             cp "$OUT/app-release.apk" salida/mi-prime.apk
-            java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs salida/mi-prime.apk \
-              | grep -E "^Verified using v[23]|Signer #1 certificate (DN|SHA-256)"
+            java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs salida/mi-prime.apk > firma.txt
+            grep -E "^Verified using v[23]|Signer #1 certificate (DN|SHA-256)" firma.txt
+            # Siempre la misma llave: con otra, el APK no se instalaría encima del que ya está.
+            grep -q "Signer #1 certificate SHA-256 digest: $HUELLA" firma.txt \
+              || { echo "::error::El APK no está firmado con la llave de Mi Prime (huella distinta)."; exit 1; }
           else
             cp "$OUT/app-release-unsigned.apk" salida/mi-prime-sin-firmar.apk
             echo "::warning::Faltan los secretos ANDROID_FIRMA y ANDROID_CLAVE: el APK sale sin firmar y no se puede instalar."
