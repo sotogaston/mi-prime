@@ -75,7 +75,9 @@ mi-prime/
 ├── manifest.webmanifest    nombre, íconos y modo standalone
 ├── sw.js                   service worker: caché offline
 ├── icons/                  192, 512 y maskable
-├── test.mjs                75 pruebas automatizadas (Playwright)
+├── test.mjs                77 pruebas automatizadas (Playwright)
+├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
+├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos
 ├── PUBLICAR.md             cómo subirla a GitHub Pages
 ├── package.json
@@ -85,6 +87,12 @@ mi-prime/
 Todo el código de la app vive en `index.html`, dividido en 7 secciones
 comentadas: estado y persistencia, reglas del sistema, arranque, geometría de las
 ruedas, vistas, interacción, y PWA.
+
+La lógica pura (fechas, reglas, estadísticas, metas e import de pasos) está entre
+los marcadores `/* @logica:inicio */` y `/* @logica:fin */`. Es la **única copia**:
+las pruebas en Node la recortan de ahí con `cargar-logica.mjs`, así que prueban
+exactamente lo que se publica. Ese bloque solo puede usar `S` y `save()` de
+afuera; `test.mjs` falla si alguien le mete una dependencia del navegador.
 
 ## Correr las pruebas
 
@@ -104,6 +112,13 @@ abierta con doble clic desde el disco siga andando.
 La suite corre con la fecha fija en un miércoles (`HOY_FIJO` en `test.mjs`), así
 da lo mismo correrla un domingo. Si ya tenés un Chromium instalado:
 `PW_CHROME=/ruta/a/chrome npm test`.
+
+Las pruebas de la lógica contra tus datos reales (respaldo + export de pasos de
+Samsung Health, que nunca van al repo) corren con Node, sin navegador:
+
+```bash
+PRIME_DATA=/ruta/a/mis-datos node mi-prime-v2.pruebas.js
+```
 
 Para verla en local sobre http (con service worker): `npm run serve`.
 

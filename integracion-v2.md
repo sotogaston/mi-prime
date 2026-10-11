@@ -1,5 +1,10 @@
 # Integrar v2 en index.html
 
+> **Histórico.** Esta integración ya está hecha y `mi-prime-v2.js` se borró: la
+> lógica vive solo en `index.html`, entre `/* @logica:inicio */` y
+> `/* @logica:fin */`. `mi-prime-v2.pruebas.js` la lee de ahí con
+> `cargar-logica.mjs`. Queda como registro de los seis enganches.
+
 `mi-prime-v2.js` reemplaza al módulo anterior de import (lo incluye entero). Va antes del `</script>` final. Después hay que tocar seis lugares del código que ya tenés.
 
 ## Los seis enganches

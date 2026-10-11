@@ -240,9 +240,6 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
    1. ESTADO Y PERSISTENCIA
    ========================================================================= */
 const KEY = "miPrime.v1";
-/* NODATA nunca se guarda: es como se lee el amarillo que puso el cierre
-   automático en un día hábil que nadie abrió (ver getMark). */
-const ST = { GREEN:"green", YELLOW:"yellow", BLUE:"blue", NODATA:"nodata" };
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const DIAS = ["dom","lun","mar","mié","jue","vie","sáb"];
 const DIAS_LARGOS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
@@ -285,6 +282,19 @@ function seed(){
     settings: { lastClosed:null, texture:false, theme:"auto" }
   };
 }
+
+/* @logica:inicio */
+/* =========================================================================
+   LÓGICA PURA — única copia
+   -------------------------------------------------------------------------
+   De acá hasta @logica:fin: fechas, reglas, estadísticas, metas e import.
+   Las pruebas en Node (mi-prime-v2.pruebas.js, vía cargar-logica.mjs)
+   recortan este bloque y lo corren tal cual, así que tiene que poder
+   ejecutarse solo: lo único que usa de afuera es S y save().
+   ========================================================================= */
+/* NODATA nunca se guarda: es como se lee el amarillo que puso el cierre
+   automático en un día hábil que nadie abrió (ver getMark). */
+const ST = { GREEN:"green", YELLOW:"yellow", BLUE:"blue", NODATA:"nodata" };
 
 /* ---- fechas ---- */
 function iso(d){
@@ -401,11 +411,9 @@ function countRange(y, m, from, to, hid){
 /* =========================================================================
    2.5. MÓDULO v2 — origen de las marcas, reglas rotas, metas, import
    -------------------------------------------------------------------------
-   Viene de mi-prime-v2.js. Dos adaptaciones para convivir con el código que
-   ya estaba, sin cambiar ninguna lógica:
-     · no se redeclara ST (ya existe arriba, con los mismos valores)
-     · migrate() del módulo se llama acá migrateV2(), porque migrate() ya
-       existe y normaliza el estado v1 en cada load()
+   Antes vivía también en mi-prime-v2.js; ahora esta es la única copia.
+   migrateV2() se llama así porque migrate() ya existe y normaliza el
+   estado v1 en cada load().
    Prime % = verdes/(verdes+amarillos+sin dato): el sin dato cuenta como
    no hecho, aunque no sea una regla rota.
    ========================================================================= */
@@ -662,6 +670,7 @@ function applyStepImport(S, plan, accepted){
   save();
   return n;
 }
+/* @logica:fin */
 
 /* =========================================================================
    3. ARRANQUE

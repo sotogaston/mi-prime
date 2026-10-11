@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve, dirname, extname, normalize } from 'node:path';
+import { cargarLogica } from './cargar-logica.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let pass = 0, fail = 0;
@@ -398,7 +399,20 @@ console.log('\n== 18. Importar respaldo: valida antes de guardar ==');
   await c.close();
 }
 
-console.log('\n== 19. Capturas ==');
+console.log('\n== 19. La lógica de index.html corre sola en Node ==');
+{
+  // Lo mismo que usa mi-prime-v2.pruebas.js: si alguien saca algo del bloque
+  // @logica o le mete una dependencia del navegador, falla acá.
+  const S = estado({ marks: { '2026-09-30': { hA: 'yellow' }, '2026-10-01': { hA: 'yellow' }, '2026-10-02': { hB: 'yellow' } } });
+  S.autoClosed = { '2026-10-02': ['hB'] };
+  let L = null, err = '';
+  try { L = cargarLogica(S); } catch (e) { err = String(e); }
+  ok('el bloque @logica se carga sin navegador ' + err, !!L && typeof L.stats === 'function' && L.ST?.NODATA === 'nodata');
+  const r = L?.stats(S, '2026-10-01', '2026-10-31');
+  ok('y cuenta igual que la app: 1 regla rota cruzando el mes, 1 sin dato', r?.reglasRotas === 1 && r?.sinDato === 1);
+}
+
+console.log('\n== 20. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
