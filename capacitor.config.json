@@ -1,0 +1,14 @@
+{
+  "appId": "com.sotogaston.miprime",
+  "appName": "Mi Prime",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0d0d0d"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_miprime",
+      "iconColor": "#0ca30c"
+    }
+  }
+}

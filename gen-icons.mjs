@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,7 +21,7 @@ const GRID = [
   [OK, OK, OK, OK, OK, FREE, OK, OK, EMPTY, EMPTY, EMPTY, OK]
 ];
 
-function svg(size, inset) {
+function svg(size, inset, { fondo = 'cuadrado' } = {}) {
   const c = size / 2;
   const R = c * (1 - inset);
   const HOLE = R * 0.30;
@@ -34,18 +34,21 @@ function svg(size, inset) {
       paths += `<path d="${sector(c, r0, r1, s * step + gap / 2, (s + 1) * step - gap / 2)}" fill="${GRID[r][s]}"/>`;
     }
   }
+  const base = fondo === 'cuadrado' ? `<rect width="${size}" height="${size}" fill="${BG}"/>`
+             : fondo === 'circulo' ? `<circle cx="${c}" cy="${c}" r="${c}" fill="${BG}"/>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-    <rect width="${size}" height="${size}" fill="${BG}"/>${paths}</svg>`;
+    ${base}${paths}</svg>`;
 }
 
 const b = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined });
 const p = await (await b.newContext({ deviceScaleFactor: 1 })).newPage();
 
-async function png(size, inset, name) {
-  const s = svg(size, inset);
+async function png(size, inset, name, { fondo = 'cuadrado', ruta = resolve(HERE, 'icons', name) } = {}) {
+  const s = svg(size, inset, { fondo });
+  const transparente = fondo !== 'cuadrado';
   await p.setViewportSize({ width: size, height: size });
-  await p.setContent(`<body style="margin:0;background:${BG}">${s}</body>`);
-  await p.screenshot({ path: resolve(HERE, 'icons', name), omitBackground: false });
+  await p.setContent(`<body style="margin:0;background:${transparente ? 'transparent' : BG}">${s}</body>`);
+  await p.screenshot({ path: ruta, omitBackground: transparente });
   console.log('  ' + name);
 }
 
@@ -54,5 +57,29 @@ await png(512, 0.10, 'icon-512.png');
 await png(512, 0.22, 'maskable-512.png');   // más margen: la zona segura del maskable es el 80% central
 writeFileSync(resolve(HERE, 'icons', 'icon.svg'), svg(512, 0.10));
 console.log('  icon.svg');
+
+// App de Android (Capacitor): lanzador por densidad, ícono adaptable y pantalla de inicio
+const RES = resolve(HERE, 'android', 'app', 'src', 'main', 'res');
+if (existsSync(RES)) {
+  const DENS = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 };
+  for (const [d, k] of Object.entries(DENS)) {
+    const dir = resolve(RES, 'mipmap-' + d);
+    await png(48 * k, 0.10, `mipmap-${d}/ic_launcher.png`, { ruta: resolve(dir, 'ic_launcher.png') });
+    await png(48 * k, 0.12, `mipmap-${d}/ic_launcher_round.png`, { fondo: 'circulo', ruta: resolve(dir, 'ic_launcher_round.png') });
+    // adaptable: 108 dp, el dibujo dentro del 66 % central; el fondo es un color
+    await png(108 * k, 0.24, `mipmap-${d}/ic_launcher_foreground.png`, { fondo: 'ninguno', ruta: resolve(dir, 'ic_launcher_foreground.png') });
+  }
+  writeFileSync(resolve(RES, 'values', 'ic_launcher_background.xml'),
+    `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${BG}</color>\n</resources>\n`);
+  // pantallas de inicio: fondo oscuro y la rueda al centro, al tamaño de cada splash.png
+  for (const d of readdirSync(RES).filter(d => d.startsWith('drawable') && existsSync(resolve(RES, d, 'splash.png')))) {
+    const f = resolve(RES, d, 'splash.png'), b = readFileSync(f);
+    const w = b.readUInt32BE(16), h = b.readUInt32BE(20), lado = Math.round(Math.min(w, h) * 0.42);
+    await p.setViewportSize({ width: w, height: h });
+    await p.setContent(`<body style="margin:0;background:${BG};display:grid;place-items:center;height:100vh">${svg(lado, 0, { fondo: 'ninguno' })}</body>`);
+    await p.screenshot({ path: f });
+    console.log(`  ${d}/splash.png ${w}x${h}`);
+  }
+}
 
 await b.close();

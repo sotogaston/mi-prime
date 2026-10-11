@@ -60,17 +60,51 @@ Cada hábito puede tener horario de lunes a viernes (**Más → ✎**: desde y h
 Con horario, **Hoy** se ordena por hora y marca el bloque de *ahora*.
 
 Una PWA sin servidor no puede programar notificaciones con la app cerrada, así
-que los avisos van por calendario: **Más → Recordatorios en el calendario** baja
-un `.ics` con un evento por horario (los hábitos a la misma hora van juntos), de
-lunes a viernes, sin feriados, con zona horaria explícita y el link a la app.
-Se importa en Google Calendar desde la compu, en un calendario propio con la
-notificación predeterminada "al momento del evento". Para despertarte y
-acostarte conviene además una alarma del Reloj: suena aunque el teléfono esté en
-reposo.
+que los avisos los da la **app de Android** (ver abajo): a la hora de cada
+hábito, de lunes a viernes, sin feriados, y no avisa lo que ya marcaste hoy.
+Los hábitos a la misma hora van en un solo aviso. Desde la web, **Más →
+Recordatorios en el calendario** sigue bajando un `.ics` para quien prefiera
+el calendario.
 
 Lo de la noche se confirma a la mañana: si el último día hábil (hasta 3 días
 atrás) quedó con hábitos sin marcar, Hoy los muestra con ✓ / ✕ antes de que
 queden en gris.
+
+## App de Android
+
+Es la misma `index.html` dentro de una app de [Capacitor](https://capacitorjs.com)
+(`android/`), con dos agregados que en la web no existen: **avisos programados**
+(plugin Local Notifications, alarmas exactas, 14 días hacia adelante que se
+reprograman cada vez que marcás algo) y **exportar respaldo** con el menú de
+compartir (Drive, WhatsApp, mail).
+
+Instalarla:
+
+1. En la web: **Más → Exportar respaldo**.
+2. **Más → Bajar la app de Android** (la release
+   [`android`](https://github.com/sotogaston/mi-prime/releases/tag/android)) y
+   abrir el archivo. Android pide permiso para instalar apps de esa fuente: se
+   da una vez.
+3. En la app: **Más → Importar respaldo**, aceptar las notificaciones y
+   **Probar un aviso**. Si un aviso llega tarde: Ajustes → Apps → Mi Prime →
+   Batería → Sin restricciones.
+
+Los datos de la app y los de la web son independientes: se pasan con el
+respaldo. Las versiones nuevas se instalan encima sin perder nada.
+
+Cómo se arma: el workflow **App de Android** (`.github/workflows/android.yml`)
+corre las pruebas en cada push y después compila el APK. El número de versión
+es la cantidad de commits, así cada una es mayor que la anterior. Con los
+secretos del repo `ANDROID_FIRMA` (la llave `mi-prime.p12` en base64) y
+`ANDROID_CLAVE` lo firma; en `main` además lo publica en la release `android`,
+que es el link de la web.
+
+La llave **nunca va al repo** (`.gitignore` la bloquea). Está guardada en
+Google Drive, en *Mi Prime — llave de la app de Android*: es lo único que hace
+falta para volver a cargar los secretos. Si se pierde, la versión siguiente no
+se instala encima: hay que exportar, desinstalar, instalar y volver a importar.
+En una compu con el SDK de Android también se compila firmado con
+`npm run android:apk`, con `android/keystore.properties` apuntando a la llave.
 
 ---
 
@@ -98,10 +132,13 @@ mi-prime/
 ├── manifest.webmanifest    nombre, íconos y modo standalone
 ├── sw.js                   service worker: caché offline
 ├── icons/                  192, 512 y maskable
-├── test.mjs                112 pruebas automatizadas (Playwright)
+├── android/                la app de Android (Capacitor); android:sync copia la web adentro
+├── capacitor.config.json   id de la app y color del ícono de los avisos
+├── .github/workflows/      pruebas y APK firmado en cada push
+├── test.mjs                135 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
-├── gen-icons.mjs           regenera los íconos
+├── gen-icons.mjs           regenera los íconos (web y Android)
 ├── PUBLICAR.md             cómo subirla a GitHub Pages
 ├── package.json
 └── README.md
@@ -165,13 +202,11 @@ Para verla en local sobre http (con service worker): `npm run serve`.
   bien, muestra qué trae y qué reemplaza, y pide confirmación.
 
 - **Sin dependencias también en runtime.** El service worker cachea seis archivos
-  y nada más. No hay CDN que pueda caerse ni build que pueda romperse.
+  y nada más. No hay CDN que pueda caerse, y la web no tiene build: Capacitor
+  solo envuelve la misma `index.html` para Android.
 
 ## Próximos pasos
 
-- Recordatorio a hora fija — lo más importante para no dejar de marcar. En PWA se
-  hace con Notifications + Push API; en Android anda bien, en iOS solo con la app
-  ya instalada en la pantalla de inicio.
 - Sincronización real entre dispositivos en lugar del export manual.
 - Multi-usuario y plantillas de hábitos, para que sirva a otras personas.
 - Vista anual y comparación mes contra mes.

@@ -7,3 +7,9 @@ demo-*.png
 mi-prime-*.json
 com_samsung_*.csv
 *.zip
+
+# App de Android: www/ se arma con npm run www; la firma nunca va al repo
+www/
+android/keystore.properties
+*.jks
+*.keystore

@@ -1,0 +1,108 @@
+# Pruebas de la app y APK de Android.
+# Con los secretos ANDROID_FIRMA (llave .p12 en base64) y ANDROID_CLAVE, el APK sale firmado;
+# en main además se publica en la release "android", que es de donde lo baja la web (Más).
+name: App de Android
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash   # con pipefail: si apksigner falla, falla el paso
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: node test.mjs
+
+  apk:
+    needs: pruebas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write   # solo para publicar la release desde main
+    env:
+      FIRMA: ${{ secrets.ANDROID_FIRMA }}
+      CLAVE: ${{ secrets.ANDROID_CLAVE }}
+      HUELLA: 430d91043cb28aabc5d3db93feb2a214842bc51bc67a152754d88868f85cf2f0   # SHA-256 del certificado
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # el número de versión es la cantidad de commits
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+      - name: Copiar la app al proyecto de Android
+        run: npm run android:sync
+      - name: Llave de firma
+        if: env.FIRMA != ''
+        run: |
+          # Tolera espacios o saltos de línea que se cuelan al pegar los secretos
+          printf %s "$FIRMA" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/mi-prime.p12"
+          CLAVE="$(printf %s "$CLAVE" | tr -d '[:space:]')"
+          keytool -list -storetype PKCS12 -keystore "$RUNNER_TEMP/mi-prime.p12" -storepass "$CLAVE" -alias mi-prime > /dev/null \
+            || { echo "::error::ANDROID_FIRMA y ANDROID_CLAVE no abren la llave: volvé a copiarlos del documento de Drive."; exit 1; }
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=mi-prime\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/mi-prime.p12" "$CLAVE" "$CLAVE" > android/keystore.properties
+      - name: Compilar
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease -PversionCode="$(git rev-list --count HEAD)"
+      - name: Revisar el APK
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          OUT=android/app/build/outputs/apk/release
+          mkdir -p salida
+          if [ -n "$FIRMA" ]; then
+            cp "$OUT/app-release.apk" salida/mi-prime.apk
+            java -jar "$BT/lib/apksigner.jar" verify --verbose --print-certs salida/mi-prime.apk > firma.txt 2>&1
+            grep -iE "^Verified using|certificate (DN|SHA-256 digest)" firma.txt
+            # Siempre la misma llave: con otra, el APK no se instalaría encima del que ya está.
+            # (el texto antes de "certificate" cambia según la versión de apksigner)
+            grep -qi "certificate SHA-256 digest: $HUELLA" firma.txt \
+              || { cat firma.txt; echo "::error::El APK no está firmado con la llave de Mi Prime (huella distinta)."; exit 1; }
+          else
+            cp "$OUT/app-release-unsigned.apk" salida/mi-prime-sin-firmar.apk
+            echo "::warning::Faltan los secretos ANDROID_FIRMA y ANDROID_CLAVE: el APK sale sin firmar y no se puede instalar."
+          fi
+          "$BT/aapt2" dump badging salida/*.apk \
+            | grep -E "^(package|sdkVersion|targetSdkVersion|uses-permission|application-label):"
+          sha256sum salida/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mi-prime-apk
+          path: salida/
+          retention-days: 7
+      - name: Publicar en la release "android"
+        if: github.ref == 'refs/heads/main' && env.FIRMA != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="1.0.$(git rev-list --count HEAD)"
+          gh release delete android --cleanup-tag --yes || true
+          gh release create android salida/mi-prime.apk --target "$GITHUB_SHA" --latest \
+            --title "App de Android $VERSION" \
+            --notes "Mi Prime $VERSION para Android (commit ${GITHUB_SHA::7}). Se instala encima de la anterior sin perder los datos."
