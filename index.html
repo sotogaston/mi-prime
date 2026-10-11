@@ -190,7 +190,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in srgb,var(--surface) 88%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom)}
-.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr)}
+.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
 .navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--muted)}
 .navin button b{font-size:20px;line-height:1;font-weight:400}
 .navin button[aria-current=true]{color:var(--ink)}
@@ -212,6 +212,18 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
 .i-blue{background:var(--free);color:#fff} .i-none{background:var(--empty);color:var(--muted)}
 .sheet .row2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:6px}
 .danger{color:#d03b3b}
+
+/* ---------- pasos ---------- */
+.hero{font-size:48px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.hero small{display:block;font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0;margin-top:6px}
+.meter{height:10px;border-radius:999px;background:var(--empty);overflow:hidden;margin-top:12px}
+.meter i{display:block;height:100%;border-radius:999px}
+.stats.chico .stat b{font-size:20px}
+.eje{font-size:9.5px;fill:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.eje.fuerte{fill:var(--ink-2)}
+.pdet{font-size:13px;color:var(--ink-2);min-height:19px;margin:6px 0 0;text-align:center}
+.mnav button:disabled{opacity:.3}
+details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 </style>
 </head>
 <body>
@@ -231,6 +243,7 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
     <button data-tab="hoy"    aria-current="true"><b>◎</b>Hoy</button>
     <button data-tab="mes"    aria-current="false"><b>◍</b>Mes</button>
     <button data-tab="semana" aria-current="false"><b>◔</b>Semanas</button>
+    <button data-tab="pasos"  aria-current="false"><b>▥</b>Pasos</button>
     <button data-tab="mas"    aria-current="false"><b>≡</b>Más</button>
   </div>
 </nav>
@@ -249,6 +262,7 @@ const NATIVO = !!window.Capacitor?.isNativePlatform?.();
 /* La compila y la firma GitHub Actions en cada cambio de main (.github/workflows/android.yml). */
 const APK_URL = "https://github.com/sotogaston/mi-prime/releases/download/android/mi-prime.apk";
 let AVISOS_ESTADO = null, avisosTimer = null;   // avisos de la app (sección 8); render() ya los usa
+let PASOS_ESTADO = null, pasosEnCurso = null;   // lectura de Health Connect (sección 8); vPasos() la muestra
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const DIAS = ["dom","lun","mar","mié","jue","vie","sáb"];
 const DIAS_LARGOS = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
@@ -271,6 +285,7 @@ function migrate(s){
   s.doLess ||= []; s.doMore ||= []; s.settings ||= {};
   s.autoClosed ||= {}; s.values ||= {};   // v2: quién escribió la marca y el valor real
   s.feriados ||= []; s.laborables ||= []; // feriados propios y feriados que se trabajan (ver esLibre)
+  s.pasos ||= {};                          // pasos por día: Health Connect o el CSV de Samsung Health
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
   return s;
@@ -700,6 +715,71 @@ function applyStepImport(S, plan, accepted){
   return n;
 }
 
+/* ---- pasos por día ----
+   S.pasos = { "2026-10-13": 7421 }. Health Connect manda: pisa lo guardado
+   (Samsung Health a veces recalcula un día). El CSV de Samsung solo completa o
+   sube. Un día sin registro no es un día con 0 pasos: no entra en el promedio. */
+const META_PASOS = 6000;
+function metaPasos(S){
+  return S.habits.find(h => h.auto?.source === "steps")?.auto.threshold || META_PASOS;
+}
+function mezclarPasos(S, porDia, fuente){
+  if(!S.pasos) S.pasos = {};
+  let cambios = 0;
+  for(const [d, v] of Object.entries(porDia)){
+    const n = Math.round(Number(v));
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(n) || n < 0) continue;
+    const antes = S.pasos[d];
+    const nuevo = fuente === "csv" ? Math.max(antes ?? 0, n) : n;
+    if(nuevo !== antes){ S.pasos[d] = nuevo; cambios++; }
+  }
+  return cambios;
+}
+
+/* Semanas de lunes a domingo. vista: "dia" | "semana" | "mes" | "anio" */
+function lunesDe(ds){ const d = parseISO(ds); return iso(addDays(d, -((d.getDay() + 6) % 7))); }
+function rangoPasos(vista, ref){
+  const d = parseISO(ref), y = d.getFullYear(), m = d.getMonth();
+  if(vista === "dia") return { desde: ref, hasta: ref };
+  if(vista === "semana"){ const l = lunesDe(ref); return { desde: l, hasta: iso(addDays(parseISO(l), 6)) }; }
+  if(vista === "mes") return { desde: iso(new Date(y, m, 1)), hasta: iso(new Date(y, m + 1, 0)) };
+  return { desde: iso(new Date(y, 0, 1)), hasta: iso(new Date(y, 11, 31)) };
+}
+function moverPasos(vista, ref, n){
+  const d = parseISO(ref);
+  if(vista === "dia") return iso(addDays(d, n));
+  if(vista === "semana") return iso(addDays(d, 7 * n));
+  if(vista === "mes") return iso(new Date(d.getFullYear(), d.getMonth() + n, 1));
+  return iso(new Date(d.getFullYear() + n, 0, 1));
+}
+
+/* Total, promedio diario, días con meta y mejor día entre desde y hasta.
+   El día en curso suma al total pero no al promedio (sigue sumando pasos),
+   salvo que sea el único día con dato. */
+function resumenPasos(pasos, desde, hasta, meta, hoy){
+  let total = 0, dias = 0, conMeta = 0, mejor = null;
+  const serie = [];
+  for(let d = parseISO(desde); iso(d) <= hasta; d = addDays(d, 1)){
+    const ds = iso(d);
+    const n = ds <= hoy ? pasos?.[ds] ?? null : null;
+    serie.push({ fecha: ds, pasos: n });
+    if(n == null) continue;
+    total += n; dias++;
+    if(n >= meta) conMeta++;
+    if(!mejor || n > mejor.pasos) mejor = { fecha: ds, pasos: n };
+  }
+  const deHoy = desde <= hoy && hoy <= hasta ? pasos?.[hoy] : undefined;
+  const cerrados = deHoy != null && dias > 1 ? dias - 1 : dias;
+  const base = deHoy != null && dias > 1 ? total - deHoy : total;
+  return { total, dias, conMeta, mejor, serie,
+           promedio: cerrados ? Math.round(base / cerrados) : 0, diasPromedio: cerrados };
+}
+/* Un resumen por mes del año: lo que dibuja la vista Año. */
+function resumenAnual(pasos, anio, meta, hoy){
+  return Array.from({ length: 12 }, (_, m) =>
+    Object.assign({ mes: m }, resumenPasos(pasos, iso(new Date(anio, m, 1)), iso(new Date(anio, m + 1, 0)), meta, hoy)));
+}
+
 /* ---- horarios ----
    Cada hábito puede tener h.hora ("07:15") y h.hasta ("08:00"). */
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -977,7 +1057,7 @@ function diaRelativo(ds){
 const view = document.getElementById("view");
 
 function render(){
-  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, mas:vMas })[TAB]();
+  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, mas:vMas })[TAB]();
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
   window.scrollTo(0,0);
@@ -1146,6 +1226,156 @@ function vSemana(){
     <span style="color:var(--muted);font-size:12.5px">— Brian Tracy</span></p></div>`;
 }
 
+/* ---------- pasos: día, semana, mes y año, como Samsung Health ---------- */
+let PASOS_VISTA = "semana", PASOS_REF = TODAY, PASOS_ITEMS = [];
+const MESES_CORTOS = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+const fmt = n => n.toLocaleString("es-AR");
+function compacto(n){ return n >= 1000 ? String(Math.round(n / 100) / 10).replace(".", ",") + "K" : String(n); }
+function fechaCorta(ds){ const d = parseISO(ds); return `${DIAS[d.getDay()]} ${d.getDate()} ${MESES_CORTOS[d.getMonth()]}`; }
+function tituloPasos(vista, desde, hasta){
+  const a = parseISO(desde), b = parseISO(hasta);
+  if(vista === "dia") return desde === TODAY ? "Hoy" : diasEntre(desde, TODAY) === 1 ? "Ayer" : cap(fechaCorta(desde));
+  if(vista === "semana") return a.getMonth() === b.getMonth()
+    ? `${a.getDate()} al ${b.getDate()} de ${MESES[b.getMonth()]}`
+    : `${a.getDate()} ${MESES_CORTOS[a.getMonth()]} al ${b.getDate()} ${MESES_CORTOS[b.getMonth()]}`;
+  if(vista === "mes") return `${cap(MESES[a.getMonth()])} ${a.getFullYear()}`;
+  return String(a.getFullYear());
+}
+
+/* Columnas: verde si llegó a la meta, gris si no; la línea marca la meta.
+   items: [{ eje, valor (null = sin dato), titulo }]; destacar = índice a resaltar */
+function barrasPasos(items, meta, destacar){
+  const W = 340, H = 168, L = 30, R = 6, T = 14, B = 20;
+  const max = Math.max(meta, ...items.map(i => i.valor || 0));
+  const paso = max <= 8000 ? 2000 : max <= 20000 ? 5000 : 10000;
+  const tope = Math.ceil(max / paso) * paso;
+  const y = v => T + (H - T - B) * (1 - v / tope);
+  const banda = (W - L - R) / items.length;
+  const ancho = Math.min(24, Math.max(3, banda * 0.62)), radio = Math.min(4, ancho / 2);
+  let fondo = "", barras = "", ejes = "";
+  for(let v = 0; v <= tope; v += paso)
+    fondo += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`
+           + `<text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" class="eje">${compacto(v)}</text>`;
+  items.forEach((it, i) => {
+    const cx = L + banda * (i + .5);
+    if(it.eje) ejes += `<text x="${cx}" y="${H - 5}" text-anchor="middle" class="eje">${it.eje}</text>`;
+    if(it.valor > 0){
+      const y0 = y(0), y1 = Math.min(y(it.valor), y0 - 1), x0 = cx - ancho / 2, x1 = cx + ancho / 2;
+      const r = Math.min(radio, y0 - y1);
+      const tenue = destacar != null && i !== destacar ? ` opacity=".35"` : "";
+      barras += `<path d="M${x0},${y0}V${y1 + r}Q${x0},${y1} ${x0 + r},${y1}H${x1 - r}Q${x1},${y1} ${x1},${y1 + r}V${y0}Z" `
+              + `fill="${it.valor >= meta ? "var(--ok)" : "var(--muted)"}"${tenue}/>`;
+    }
+    barras += `<rect data-act="pbar" data-i="${i}" x="${L + banda * i}" y="${T}" width="${banda}" height="${H - T - B}" fill="transparent">`
+            + `<title>${esc(it.titulo)}</title></rect>`;
+  });
+  const ym = y(meta);
+  const linea = `<line x1="${L}" x2="${W - R}" y1="${ym}" y2="${ym}" stroke="var(--ink-2)" stroke-width="1" pointer-events="none"/>`
+              + `<text x="${W - R}" y="${ym - 4}" text-anchor="end" class="eje fuerte" pointer-events="none">Meta ${compacto(meta)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pasos por ${items.length === 12 ? "mes" : "día"}">${fondo}${barras}${linea}${ejes}</svg>`;
+}
+
+function tarjetaFuentePasos(){
+  if(!NATIVO) return `<div class="card"><div class="card-t">De dónde salen los pasos</div>
+    <p style="font-size:13.5px;margin:0;line-height:1.5;color:var(--ink-2)">En la app de Android se cargan solos desde Health Connect.
+      Acá podés cargar el CSV de Samsung Health (el archivo que termina en <i>step_daily_trend</i>).</p>
+    <button class="btn ghost" data-act="importPasos">Importar pasos (Samsung Health)</button></div>`;
+  const e = PASOS_ESTADO;
+  if(e?.ok) return "";
+  const msg = !e ? "Leyendo tus pasos de Health Connect…"
+    : e.error === "sin-hc" ? "Este celular no tiene Health Connect, que es de donde la app lee los pasos de Samsung Health."
+    : e.error === "sin-permiso" ? "Dale permiso a Mi Prime para leer tus pasos de Health Connect. Se leen en el celular y no salen de ahí."
+    : "No se pudieron leer los pasos: " + e.detalle;
+  const boton = !e ? ""
+    : e.error === "sin-hc" ? `<button class="btn" data-act="hcInstalar">Instalar Health Connect</button>`
+    : e.error === "sin-permiso" ? `<button class="btn" data-act="hcConectar">Conectar con Health Connect</button>`
+    : `<button class="btn ghost" data-act="hcActualizar">Reintentar</button>`;
+  return `<div class="card"><div class="card-t">Health Connect</div>
+    <p style="font-size:14px;margin:0;line-height:1.5">${esc(msg)}</p>${boton}</div>`;
+}
+
+function vPasos(){
+  const meta = metaPasos(S), pasos = S.pasos || {};
+  const { desde, hasta } = rangoPasos(PASOS_VISTA, PASOS_REF);
+  const vistas = [["dia","Día"],["semana","Semana"],["mes","Mes"],["anio","Año"]]
+    .map(([k, t]) => `<button class="chip" data-act="pvista" data-v="${k}" aria-pressed="${PASOS_VISTA === k}">${t}</button>`).join("");
+  const nav = `<div class="mnav"><button data-act="pmover" data-n="-1" aria-label="Anterior">‹</button>
+    <b style="text-transform:none">${tituloPasos(PASOS_VISTA, desde, hasta)}</b>
+    <button data-act="pmover" data-n="1" aria-label="Siguiente" ${hasta >= TODAY ? "disabled" : ""}>›</button></div>`;
+
+  let cuerpo, filas;
+  if(PASOS_VISTA === "anio"){
+    const meses = resumenAnual(pasos, parseISO(desde).getFullYear(), meta, TODAY);
+    const r = resumenPasos(pasos, desde, hasta, meta, TODAY);
+    PASOS_ITEMS = meses.map(x => ({ eje: MESES[x.mes][0].toUpperCase(), valor: x.dias ? x.promedio : null,
+      titulo: x.dias ? `${cap(MESES[x.mes])}: ${fmt(x.promedio)} pasos por día · ${fmt(x.total)} en total` : `${cap(MESES[x.mes])}: sin datos` }));
+    cuerpo = heroPasos(r.total, "pasos en el año") + statsPasos(r) + `<div class="card"><div class="card-t">Promedio diario de cada mes</div>
+      ${barrasPasos(PASOS_ITEMS, meta)}<p class="pdet" id="pdet">Tocá un mes para ver el detalle</p></div>`;
+    filas = meses.filter(x => x.dias).map(x => `<tr><td>${cap(MESES[x.mes])}</td><td>${fmt(x.total)}</td><td>${fmt(x.promedio)}</td></tr>`);
+    filas = filas.length ? `<tr><th>Mes</th><th>Total</th><th>Por día</th></tr>` + filas.join("") : "";
+  } else {
+    // Día: la semana de ese día, con el día resaltado
+    const rango = PASOS_VISTA === "dia" ? rangoPasos("semana", PASOS_REF) : { desde, hasta };
+    const r = resumenPasos(pasos, rango.desde, rango.hasta, meta, TODAY);
+    const mes = PASOS_VISTA === "mes";
+    PASOS_ITEMS = r.serie.map(x => {
+      const d = parseISO(x.fecha).getDate();
+      return { fecha: x.fecha, valor: x.pasos,
+        eje: mes ? (d === 1 || d % 5 === 0 ? String(d) : "") : DIAS[parseISO(x.fecha).getDay()],
+        titulo: `${cap(fechaCorta(x.fecha))}: ` + (x.pasos == null ? "sin datos" : `${fmt(x.pasos)} pasos`) };
+    });
+    const grafico = `<div class="card"><div class="card-t">Pasos por día</div>${barrasPasos(PASOS_ITEMS, meta,
+      PASOS_VISTA === "dia" ? PASOS_ITEMS.findIndex(x => x.fecha === PASOS_REF) : null)}
+      <p class="pdet" id="pdet">Tocá una barra para ver el día</p></div>`;
+    if(PASOS_VISTA === "dia"){
+      const n = pasos[PASOS_REF];
+      const previos = resumenPasos(pasos, iso(addDays(parseISO(PASOS_REF), -7)), iso(addDays(parseISO(PASOS_REF), -1)), meta, TODAY);
+      const pct = n == null ? 0 : Math.round(100 * n / meta);
+      const dif = n != null && previos.dias ? n - previos.promedio : null;
+      cuerpo = `<div class="card">${heroInner(n == null ? "—" : fmt(n), n == null ? "sin datos de este día" : `pasos · ${pct} % de la meta`)}
+        <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${n ?? 0}" aria-label="Avance hacia la meta">
+          <i style="width:${Math.min(100, pct)}%;background:${n >= meta ? "var(--ok)" : "var(--muted)"}"></i></div></div>
+        <div class="stats chico">
+          <div class="stat"><b>${fmt(meta)}</b><span>Meta</span></div>
+          <div class="stat"><b>${previos.dias ? fmt(previos.promedio) : "—"}</b><span>Promedio 7 días</span></div>
+          <div class="stat"><b>${dif == null ? "—" : (dif >= 0 ? "+" : "−") + fmt(Math.abs(dif))}</b><span>Vs. promedio</span></div>
+        </div>` + grafico;
+    } else {
+      cuerpo = heroPasos(r.total, PASOS_VISTA === "semana" ? "pasos en la semana" : "pasos en el mes") + statsPasos(r) + grafico;
+    }
+    filas = r.serie.filter(x => x.pasos != null).map(x => `<tr><td>${cap(fechaCorta(x.fecha))}</td><td>${fmt(x.pasos)}</td></tr>`);
+    filas = filas.length ? `<tr><th>Día</th><th>Pasos</th></tr>` + filas.join("") : "";
+  }
+
+  const caminar = S.habits.find(h => h.auto?.source === "steps");
+  const porMarcar = caminar ? planStepImport(S, pasos, TODAY).filter(p => p.action === "proponer").length : 0;
+  const leido = NATIVO && PASOS_ESTADO?.ok
+    ? `<p style="font-size:12px;color:var(--muted);margin:0 0 12px;text-align:center">Health Connect · actualizado a las
+        ${String(PASOS_ESTADO.cuando.getHours()).padStart(2, "0")}:${String(PASOS_ESTADO.cuando.getMinutes()).padStart(2, "0")} ·
+        <button class="linkbtn" data-act="hcActualizar" style="padding:0">Actualizar</button></p>` : "";
+  const vacio = !Object.keys(pasos).length ? `<div class="card"><p style="margin:0;font-size:13.5px;color:var(--ink-2);line-height:1.5">
+      Todavía no hay pasos guardados. ${NATIVO ? "Si Health Connect no trae nada, abrí Samsung Health → Ajustes → Health Connect y dejá que comparta los <b>Pasos</b>." : ""}</p></div>` : "";
+
+  // En la app, conectar Health Connect va arriba; en la web, el CSV queda al final
+  return `${NATIVO ? tarjetaFuentePasos() : ""}${vacio}
+  <div class="chips">${vistas}</div>${nav}
+  ${cuerpo}${leido}
+  ${porMarcar ? `<div class="alert good"><span class="ic">✓</span><div style="flex:1">Con tus pasos se pueden marcar
+    <b>${porMarcar} ${porMarcar === 1 ? "día" : "días"}</b> de “${esc(caminar.name)}”.
+    <button class="linkbtn" data-act="pmarcar">Revisar</button></div></div>` : ""}
+  ${filas ? `<div class="card"><details><summary>Ver los números</summary><table class="tbl" style="margin-top:8px">${filas}</table></details></div>` : ""}
+  ${NATIVO ? "" : tarjetaFuentePasos()}`;
+}
+function heroInner(valor, sub){ return `<div class="hero">${valor}<small>${sub}</small></div>`; }
+function heroPasos(total, sub){ return `<div class="card">${heroInner(fmt(total), sub)}</div>`; }
+function statsPasos(r){
+  return `<div class="stats chico">
+    <div class="stat"><b>${r.diasPromedio ? fmt(r.promedio) : "—"}</b><span>Promedio diario</span></div>
+    <div class="stat"><b>${r.conMeta}/${r.dias}</b><span>Días con meta</span></div>
+    <div class="stat"><b>${r.mejor ? compacto(r.mejor.pasos) : "—"}</b><span>${r.mejor ? `Mejor · ${parseISO(r.mejor.fecha).getDate()} ${MESES_CORTOS[parseISO(r.mejor.fecha).getMonth()]}` : "Mejor día"}</span></div>
+  </div>`;
+}
+
 /* ---------- MÁS ---------- */
 function vMas(){
   const {y,m} = cursor, dim = daysInMonth(y,m), hs = habitsSorted();
@@ -1308,6 +1538,17 @@ function onAct(e){
     }
     case "ics": doICS(); break;
     case "probarAviso": probarAviso(); break;
+    case "pvista": PASOS_VISTA = el.dataset.v; render(); break;
+    case "pmover": {
+      const ref = moverPasos(PASOS_VISTA, PASOS_REF, +el.dataset.n);
+      PASOS_REF = ref > TODAY ? TODAY : ref;
+      render(); break;
+    }
+    case "pbar": { const it = PASOS_ITEMS[+el.dataset.i]; if(it) document.getElementById("pdet").textContent = it.titulo; break; }
+    case "pmarcar": marcarConPasos(); break;
+    case "hcConectar": sincronizarPasos(true); break;
+    case "hcActualizar": sincronizarPasos(); break;
+    case "hcInstalar": nativo("HealthPlugin", "showHealthConnectInPlayStore").catch(() => {}); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -1479,9 +1720,11 @@ function prepararRespaldo(texto){
     throw new Error("Hay un horario mal escrito.");
   for(const k of ["feriados", "laborables"])
     if(data[k] != null && !(Array.isArray(data[k]) && data[k].every(esFecha))) throw new Error(`El campo "${k}" está roto.`);
-  const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj };
+  const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj, pasos:esObj };
   for(const [k, ok] of Object.entries(forma))
     if(data[k] != null && !ok(data[k])) throw new Error(`El campo "${k}" está roto.`);
+  if(data.pasos && !Object.entries(data.pasos).every(([d, n]) => esFecha(d) && Number.isInteger(n) && n >= 0))
+    throw new Error(`El campo "pasos" está roto.`);
   if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
     throw new Error(`El campo "autoClosed" está roto.`);
   if(data.settings?.lastClosed != null && !esFecha(data.settings.lastClosed))
@@ -1518,12 +1761,8 @@ function doImport(){
 }
 
 /* ---------- import de pasos (enganche 6) ----------
-   El CSV nunca sale del teléfono: se lee en memoria y se descarta. */
+   El CSV nunca sale del teléfono: se leen los pasos por día y el archivo se descarta. */
 function doImportPasos(){
-  if(!S.habits.some(h => h.auto?.source === "steps")){
-    toast("Ningún hábito está conectado a los pasos");
-    return;
-  }
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".csv,text/csv";
   inp.onchange = () => {
@@ -1533,11 +1772,22 @@ function doImportPasos(){
       let steps;
       try{ steps = parseSamsungSteps(String(r.result)); }
       catch(e){ toast(e.message); return; }
-      renderImportUI(planStepImport(S, steps, TODAY));
+      const n = mezclarPasos(S, steps, "csv");
+      save(); render();
+      toast(n ? `${n} ${n === 1 ? "día de pasos cargado" : "días de pasos cargados"}` : "Los pasos ya estaban cargados");
+      if(S.habits.some(h => h.auto?.source === "steps"))
+        setTimeout(() => marcarConPasos(true), n ? 1200 : 0);
     };
     r.readAsText(f);
   };
   inp.click();
+}
+
+/* Propone marcar el hábito de pasos ("Caminar seguido") con los pasos guardados */
+function marcarConPasos(callado){
+  const plan = planStepImport(S, S.pasos || {}, TODAY);
+  if(callado && !plan.some(p => p.action === "proponer")) return;
+  renderImportUI(plan);
 }
 
 function renderImportUI(plan){
@@ -1573,7 +1823,10 @@ function renderImportUI(plan){
 }
 
 /* ---------- nav ---------- */
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b.dataset.tab; render(); });
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  TAB = b.dataset.tab; render();
+  if(TAB === "pasos") sincronizarPasos();
+});
 
 /* ---------- go ---------- */
 render();
@@ -1581,7 +1834,9 @@ render();
    retoma a la mañana). Si cambió la fecha, se recarga: así corre el cierre
    automático y las marcas van al día que corresponde. */
 document.addEventListener("visibilitychange", () => {
-  if(!document.hidden && iso(new Date()) !== TODAY) location.reload();
+  if(document.hidden) return;
+  if(iso(new Date()) !== TODAY) location.reload();
+  else sincronizarPasos();             // al volver a la app, los pasos de Samsung Health ya sumaron
 });
 if(autoFilled > 0){
   setTimeout(() => toast(`Se cerraron ${autoFilled} marcas de días pasados`), 500);
@@ -1692,9 +1947,49 @@ async function compartirArchivo(texto, nombre){
   }catch(e){ if(!/cancel/i.test(String(e?.message || e))) toast("No se pudo compartir el archivo"); }
 }
 
+/* Pasos: Samsung Health los comparte en Health Connect y la app los lee de ahí
+   (plugin capacitor-health), sumados por día en hora local. Health Connect solo
+   deja leer con la app abierta: se lee al abrir, al volver a la app y al entrar
+   a Pasos. El permiso se pide solo desde el botón, nunca de sorpresa. La
+   primera vez trae hasta 30 días para atrás (límite de Health Connect); después,
+   desde el último día leído. */
+function sincronizarPasos(pedirPermiso = false){
+  if(!NATIVO) return Promise.resolve();
+  if(pasosEnCurso) return pasosEnCurso;
+  const HC = (metodo, opciones) => nativo("HealthPlugin", metodo, opciones);
+  pasosEnCurso = (async () => {
+    try{
+      const { available } = await HC("isHealthAvailable");
+      if(!available){ PASOS_ESTADO = { error: "sin-hc" }; return; }
+      const pedido = { permissions: ["READ_STEPS"] };
+      let { permissions } = await HC("checkHealthPermissions", pedido);
+      if(!permissions?.READ_STEPS && pedirPermiso) ({ permissions } = await HC("requestHealthPermissions", pedido));
+      if(!permissions?.READ_STEPS){ PASOS_ESTADO = { error: "sin-permiso" }; return; }
+      const ultimo = S.settings.pasosHasta;
+      const desde = ultimo ? addDays(parseISO(ultimo), -3) : addDays(new Date(), -400);
+      const { aggregatedData = [] } = await HC("queryAggregated", { dataType: "steps", bucket: "day",
+        startDate: desde.toISOString(), endDate: new Date().toISOString() });
+      const porDia = {};
+      for(const b of aggregatedData) if(b?.value != null) porDia[String(b.startDate).slice(0, 10)] = b.value;
+      mezclarPasos(S, porDia, "hc");
+      S.settings.pasosHasta = TODAY;
+      save();
+      PASOS_ESTADO = { ok: true, cuando: new Date() };
+    }catch(e){
+      PASOS_ESTADO = { error: "fallo", detalle: e?.message || String(e) };
+    }finally{
+      pasosEnCurso = null;
+      if(TAB === "pasos") render();
+    }
+  })();
+  return pasosEnCurso;
+}
+sincronizarPasos();
+
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
-  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
+  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
+  /* pasos */ metaPasos, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
 </body>
 </html>

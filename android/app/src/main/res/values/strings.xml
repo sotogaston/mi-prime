@@ -4,4 +4,6 @@
     <string name="title_activity_main">Mi Prime</string>
     <string name="package_name">com.sotogaston.miprime</string>
     <string name="custom_url_scheme">com.sotogaston.miprime</string>
+    <!-- Health Connect la muestra cuando preguntás para qué se usan tus pasos -->
+    <string name="privacy_policy_url">https://sotogaston.github.io/mi-prime/privacidad.html</string>
 </resources>

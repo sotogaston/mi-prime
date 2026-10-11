@@ -46,7 +46,7 @@ await page.waitForTimeout(300);
 console.log('\n== 1. Carga y pantalla Hoy ==');
 ok('sin errores de consola: ' + JSON.stringify(errors), errors.length === 0);
 ok('7 hábitos renderizados', (await page.locator('.hrow').count()) === 7);
-ok('nav con 4 pestañas', (await page.locator('nav button').count()) === 4);
+ok('nav con 5 pestañas (Hoy, Mes, Semanas, Pasos, Más)', (await page.locator('nav button').count()) === 5);
 
 console.log('\n== 2. Marcado rápido (1 toque = verde) ==');
 await page.locator('.dot').first().click();
@@ -645,7 +645,176 @@ console.log('\n== 26. App de Android: avisos y respaldo ==');
   await c.close();
 }
 
-console.log('\n== 27. Capturas ==');
+// Pasos de prueba: miércoles 14/10 es HOY_FIJO (el día en curso)
+const PASOS = { '2026-10-05': 8000, '2026-10-06': 4000, '2026-10-07': 6500, '2026-10-08': 7000, '2026-10-09': 3000,
+  '2026-10-10': 12000, '2026-10-11': 5000, '2026-10-12': 9000, '2026-10-13': 5800, '2026-10-14': 2500 };
+const CAMINAR = { id: 'hP', name: 'Caminar seguido', order: 0, auto: { source: 'steps', threshold: 6000, near: 0.9 } };
+
+console.log('\n== 27. Pasos: totales y promedios ==');
+{
+  const S = { habits: [CAMINAR], marks: {}, settings: {} };
+  const L = cargarLogica(S);
+  ok('la meta de pasos es la del hábito conectado (6000), o 6000 si no hay', L.metaPasos(S) === 6000 && L.metaPasos({ habits: [] }) === 6000
+    && L.metaPasos({ habits: [{ auto: { source: 'steps', threshold: 8000 } }] }) === 8000);
+  ok('Health Connect guarda los días válidos y descarta basura', L.mezclarPasos(S, { '2026-10-12': 7000.4, '2026-10-13': 3000, x: 5, '2026-10-14': -1 }, 'hc') === 2
+    && S.pasos['2026-10-12'] === 7000 && !('x' in S.pasos) && !('2026-10-14' in S.pasos));
+  L.mezclarPasos(S, { '2026-10-12': 6900 }, 'hc');
+  ok('Health Connect manda: si recalculó un día, lo pisa', S.pasos['2026-10-12'] === 6900);
+  L.mezclarPasos(S, { '2026-10-12': 100, '2026-10-11': 8000 }, 'csv');
+  ok('el CSV de Samsung solo completa o sube, nunca baja', S.pasos['2026-10-12'] === 6900 && S.pasos['2026-10-11'] === 8000);
+  const r = (v, d) => JSON.stringify(L.rangoPasos(v, d));
+  ok('la semana va de lunes a domingo, aunque cruce el mes', r('semana', '2026-10-14') === '{"desde":"2026-10-12","hasta":"2026-10-18"}'
+    && r('semana', '2026-10-01') === '{"desde":"2026-09-28","hasta":"2026-10-04"}' && r('semana', '2026-10-18') === '{"desde":"2026-10-12","hasta":"2026-10-18"}');
+  ok('mes y año completos', r('mes', '2026-02-10') === '{"desde":"2026-02-01","hasta":"2026-02-28"}' && r('anio', '2026-10-14') === '{"desde":"2026-01-01","hasta":"2026-12-31"}');
+  ok('avanzar un mes desde el 31 cae en el mes siguiente', L.moverPasos('mes', '2026-01-31', 1) === '2026-02-01' && L.moverPasos('semana', '2026-10-14', -1) === '2026-10-07');
+  const sem = L.resumenPasos(PASOS, '2026-10-12', '2026-10-18', 6000, '2026-10-14');
+  ok(`semana: total con hoy (17.300), promedio sin hoy que sigue sumando (7.400) → ${sem.total} / ${sem.promedio}`,
+    sem.total === 17300 && sem.promedio === 7400 && sem.diasPromedio === 2 && sem.dias === 3);
+  ok('semana: 1 de 3 días con meta, mejor el lunes 12', sem.conMeta === 1 && sem.mejor.fecha === '2026-10-12' && sem.mejor.pasos === 9000);
+  ok('los días que no llegaron no tienen dato', sem.serie.length === 7 && sem.serie.slice(3).every(x => x.pasos === null));
+  const mes = L.resumenPasos(PASOS, '2026-10-01', '2026-10-31', 6000, '2026-10-14');
+  ok(`octubre: 62.800 pasos, 6.700 por día, 5 de 10 días con meta → ${mes.total} / ${mes.promedio} / ${mes.conMeta}`, mes.total === 62800 && mes.promedio === 6700 && mes.conMeta === 5);
+  const solo = L.resumenPasos({ '2026-10-14': 2500 }, '2026-10-12', '2026-10-18', 6000, '2026-10-14');
+  ok('si hoy es el único día con dato, el promedio es hoy', solo.promedio === 2500);
+  ok('un día sin registro no cuenta como 0 en el promedio', L.resumenPasos({ '2026-10-12': 8000 }, '2026-10-12', '2026-10-13', 6000, '2026-10-14').promedio === 8000);
+  const anio = L.resumenAnual(PASOS, 2026, 6000, '2026-10-14');
+  ok('año: un resumen por mes, octubre con su promedio y los demás vacíos', anio.length === 12 && anio[9].promedio === 6700 && anio[8].dias === 0);
+}
+
+console.log('\n== 28. Pasos en la web ==');
+{
+  const st = { ...estado({ habits: [CAMINAR, { id: 'hA', name: 'Leer', order: 1 }] }), pasos: PASOS };
+  const { p, c, errs } = await abrirEn(HOY_FIJO, st);
+  await ir(p, 'pasos');
+  const hero = async () => (await p.locator('.hero').first().innerText()).split('\n')[0];
+  const stats = async () => (await p.locator('.stats .stat b').allInnerTexts()).join(' | ');
+  ok('arranca en la semana actual: ' + await p.locator('.mnav b').innerText(), (await p.locator('.mnav b').innerText()) === '12 al 18 de octubre');
+  ok('total de la semana 17.300: ' + await hero(), await hero() === '17.300');
+  ok('promedio 7.400, 1/3 días con meta, mejor 9K: ' + await stats(), await stats() === '7.400 | 1/3 | 9K');
+  ok('no deja ir al futuro', await p.locator('[data-act="pmover"][data-n="1"]').isDisabled());
+  ok('7 barras para tocar, la línea de meta en 6K', await p.locator('rect[data-act="pbar"]').count() === 7 && (await p.locator('svg').last().innerHTML()).includes('Meta 6K'));
+  await p.locator('rect[data-act="pbar"][data-i="0"]').click();
+  ok('tocar una barra muestra el día: ' + await p.locator('#pdet').innerText(), (await p.locator('#pdet').innerText()) === 'Lun 12 oct: 9.000 pasos');
+  await p.locator('[data-act="pmover"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  ok('la semana anterior: 45.500 y 6.500 por día', (await p.locator('.mnav b').innerText()) === '5 al 11 de octubre' && await hero() === '45.500' && (await stats()).startsWith('6.500'));
+  await p.locator('[data-act="pvista"][data-v="mes"]').click(); await p.waitForTimeout(100);
+  ok('mes: octubre, 62.800 pasos, 6.700 por día, 5/10 con meta, mejor 12K', (await p.locator('.mnav b').innerText()) === 'Octubre 2026'
+    && await hero() === '62.800' && await stats() === '6.700 | 5/10 | 12K' && await p.locator('rect[data-act="pbar"]').count() === 31);
+  await p.locator('summary').click();
+  ok('"Ver los números" lista los 10 días con pasos', await p.locator('details tr').count() === 11);
+  await p.locator('[data-act="pvista"][data-v="anio"]').click(); await p.waitForTimeout(100);
+  ok('año: 12 barras (promedio de cada mes) y el total', (await p.locator('.mnav b').innerText()) === '2026' && await p.locator('rect[data-act="pbar"]').count() === 12 && await hero() === '62.800');
+  await p.locator('rect[data-act="pbar"][data-i="9"]').click();
+  ok('tocar octubre: ' + await p.locator('#pdet').innerText(), (await p.locator('#pdet').innerText()) === 'Octubre: 6.700 pasos por día · 62.800 en total');
+  await p.locator('[data-act="pvista"][data-v="dia"]').click(); await p.waitForTimeout(100);
+  ok('al cambiar de vista sigue en la fecha que venías mirando (mié 7)', (await p.locator('.mnav b').innerText()) === 'Mié 7 oct');
+  ok('día cumplido: 6.500 pasos, 108 % (no se corta en 100)', await hero() === '6.500' && (await p.locator('.hero').innerText()).includes('108 % de la meta'));
+  ok('vs. los 7 días anteriores (solo 2 con dato, promedio 6.000): ' + await stats(), await stats() === '6.000 | 6.000 | +500');
+  for (let i = 0; i < 7; i++) await p.locator('[data-act="pmover"][data-n="1"]').click();
+  ok('día: hoy, 2.500 pasos, 42 % de la meta', (await p.locator('.mnav b').innerText()) === 'Hoy' && (await p.locator('.hero').innerText()).includes('42 % de la meta'));
+  ok('día: meta, promedio de los 7 días anteriores y diferencia: ' + await stats(), await stats() === '6.000 | 6.900 | −4.400');
+  ok('día: la semana de ese día con hoy resaltado', await p.locator('svg path[opacity]').count() === 2);
+  ok('en la web ofrece importar el CSV', await p.locator('[data-act="importPasos"]').count() === 1 && await p.locator('[data-act="hcConectar"]').count() === 0);
+  ok('avisa que hay 9 días de "Caminar seguido" para marcar con los pasos', /9 días/.test(await p.locator('.alert.good').innerText()));
+  await p.locator('[data-act="pmarcar"]').click(); await p.waitForTimeout(150);
+  ok('"Revisar" abre la misma hoja que el import', (await p.locator('.sheet h3').innerText()) === 'Importar pasos' && await p.locator('.sheet input[type=checkbox]').count() === 9);
+  await p.locator('.sheet [data-x="c"]').click();
+  // CSV de Samsung Health: suma días y nunca baja uno que ya estaba
+  const csv = ['com.samsung.shealth.step_daily_trend,6313002,1', 'update_time,source_pkg_name,count,distance,day_time,',
+    '2026-10-04 23:00:00.000,com.sec.android.app.shealth,7777,5000,2026-10-04 00:00:00.000,',
+    '2026-10-12 23:00:00.000,com.sec.android.app.shealth,100,80,2026-10-12 00:00:00.000,'].join('\n');
+  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="importPasos"]').click()]);
+  await fc.setFiles({ name: 'com.samsung.shealth.step_daily_trend.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await p.waitForTimeout(300);
+  const pasos = await p.evaluate(() => window.__prime.S.pasos);
+  ok('el CSV suma el 04/10 (7.777) y no baja el 12/10', pasos['2026-10-04'] === 7777 && pasos['2026-10-12'] === 9000);
+  ok('avisa cuántos días cargó', /1 día de pasos cargado/.test(await p.locator('body').innerText()));
+  await p.waitForTimeout(1400);
+  ok('y después propone marcar "Caminar seguido"', (await p.locator('.sheet h3').innerText().catch(() => '')) === 'Importar pasos');
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const pasos of [{ '2026-10-12': 9000 }, { '2026-10-12': -5 }, { '2026-10-12': 1.5 }, { hoy: 3 }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, pasos })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae los pasos y rechaza pasos rotos (' + resp + ')', resp === 'ok,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 29. App de Android: pasos desde Health Connect ==');
+{
+  // Health Connect simulado: disponible, con permiso o no, y los pasos por día como los devuelve capacitor-health
+  const capacitorPasos = cfg => {
+    window.__llamadas = []; window.__hc = cfg;
+    window.Capacitor = {
+      isNativePlatform: () => true, getPlatform: () => 'android',
+      nativePromise: async (plugin, metodo, op = {}) => {
+        window.__llamadas.push({ plugin, metodo, op: JSON.parse(JSON.stringify(op)) });
+        const hc = window.__hc;
+        if (plugin !== 'HealthPlugin') return metodo === 'checkPermissions' ? { display: 'granted' } : metodo === 'getPending' ? { notifications: [] } : {};
+        if (metodo === 'isHealthAvailable') return { available: hc.disponible };
+        if (metodo === 'checkHealthPermissions') return { permissions: { READ_STEPS: hc.permiso } };
+        if (metodo === 'requestHealthPermissions') { hc.permiso = hc.otorga; return { permissions: { READ_STEPS: hc.permiso } }; }
+        if (metodo === 'queryAggregated') return { aggregatedData: hc.datos };
+        return {};
+      }
+    };
+  };
+  const abrirApp = async cfg => {
+    const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await c.clock.setFixedTime(new Date('2026-10-14T09:00:00'));
+    await c.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify(estado({ habits: [CAMINAR] })));
+    await c.addInitScript(capacitorPasos, cfg);
+    const p = await c.newPage(); p.setDefaultTimeout(5000);
+    const errs = []; p.on('pageerror', e => errs.push(String(e)));
+    await p.goto(URL); await p.waitForTimeout(400);
+    return { c, p, errs, llamadas: () => p.evaluate(() => window.__llamadas.filter(l => l.plugin === 'HealthPlugin')) };
+  };
+  const datos = [
+    { startDate: '2026-10-11T00:00', endDate: '2026-10-12T00:00', value: null },
+    { startDate: '2026-10-12T00:00', endDate: '2026-10-13T00:00', value: 9000 },
+    { startDate: '2026-10-13T00:00', endDate: '2026-10-14T00:00', value: 5800 },
+    { startDate: '2026-10-14T00:00', endDate: '2026-10-14T09:00', value: 2500 }];
+  let { c, p, errs, llamadas } = await abrirApp({ disponible: true, permiso: false, otorga: true, datos });
+  ok('al abrir mira Health Connect pero no pide permiso de sorpresa',
+    (await llamadas()).some(l => l.metodo === 'checkHealthPermissions') && !(await llamadas()).some(l => l.metodo === 'requestHealthPermissions'));
+  await ir(p, 'pasos');
+  ok('sin permiso, Pasos ofrece conectar', await p.locator('[data-act="hcConectar"]').count() === 1 && await p.locator('[data-act="importPasos"]').count() === 0);
+  await p.locator('[data-act="hcConectar"]').click(); await p.waitForTimeout(300);
+  const pedido = (await llamadas()).find(l => l.metodo === 'requestHealthPermissions');
+  const q1 = (await llamadas()).filter(l => l.metodo === 'queryAggregated').at(-1);
+  ok('el botón pide solo leer pasos', JSON.stringify(pedido?.op) === '{"permissions":["READ_STEPS"]}');
+  ok('la primera vez trae todo lo que Health Connect deje (pide 400 días)', q1?.op.dataType === 'steps' && q1.op.bucket === 'day'
+    && new Date(q1.op.startDate) < new Date('2025-09-20'));
+  const S1 = await p.evaluate(() => window.__prime.S);
+  ok('guarda los pasos por día y saltea los días sin dato', JSON.stringify(S1.pasos) === '{"2026-10-12":9000,"2026-10-13":5800,"2026-10-14":2500}'
+    && S1.settings.pasosHasta === '2026-10-14');
+  ok('Pasos ya muestra la semana: 17.300', (await p.locator('.hero').first().innerText()).startsWith('17.300') && await p.locator('[data-act="hcConectar"]').count() === 0);
+  ok('dice cuándo se actualizó', /Health Connect · actualizado a las 09:00/.test(await p.locator('#view').innerText()));
+  await p.evaluate(() => { window.__hc.datos = [{ startDate: '2026-10-13T00:00', endDate: '2026-10-14T00:00', value: 6100 }]; });
+  await p.locator('[data-act="hcActualizar"]').click(); await p.waitForTimeout(300);
+  const q2 = (await llamadas()).filter(l => l.metodo === 'queryAggregated').at(-1);
+  ok('después lee desde 3 días antes del último leído', q2.op.startDate === await p.evaluate(() => new Date(2026, 9, 11).toISOString()));
+  ok('y si Samsung Health recalculó un día, se corrige', (await p.evaluate(() => window.__prime.S.pasos['2026-10-13'])) === 6100);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+
+  ({ c, p, llamadas } = await abrirApp({ disponible: true, permiso: false, otorga: false, datos }));
+  await ir(p, 'pasos');
+  await p.locator('[data-act="hcConectar"]').click(); await p.waitForTimeout(300);
+  ok('si no da el permiso, sigue ofreciendo conectar y no lee nada', await p.locator('[data-act="hcConectar"]').count() === 1
+    && !(await llamadas()).some(l => l.metodo === 'queryAggregated'));
+  await c.close();
+
+  ({ c, p, llamadas } = await abrirApp({ disponible: false, permiso: false, otorga: false, datos }));
+  await ir(p, 'pasos');
+  await p.locator('[data-act="hcInstalar"]').click(); await p.waitForTimeout(200);
+  ok('sin Health Connect, ofrece instalarlo', (await llamadas()).some(l => l.metodo === 'showHealthConnectInPlayStore'));
+  await c.close();
+}
+
+console.log('\n== 30. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
