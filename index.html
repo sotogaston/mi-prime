@@ -698,6 +698,7 @@ function applyStepImport(S, plan, accepted){
 /* ---- horarios ----
    Cada hábito puede tener h.hora ("07:15") y h.hasta ("08:00"). */
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+function esHora(x){ return typeof x === "string" && HORA.test(x); }
 function minutos(hhmm){ const [h,m] = hhmm.split(":").map(Number); return h*60 + m; }
 function horario(h){ return h.hora ? h.hora + (h.hasta ? "–" + h.hasta : "") : ""; }
 /* El día se lee de arriba abajo: primero los que tienen hora, después el resto en su orden */
@@ -710,7 +711,7 @@ function porHora(habits){
 function esAhora(h, ahora){
   if(!h.hora) return false;
   const ini = minutos(h.hora);
-  let fin = h.hasta ? minutos(h.hasta) : ini + 15;
+  let fin = h.hasta && h.hasta !== h.hora ? minutos(h.hasta) : ini + 15;
   if(fin <= ini) fin += 1440;
   return (ahora >= ini && ahora < fin) || (ahora + 1440 >= ini && ahora + 1440 < fin);
 }
@@ -743,7 +744,7 @@ function offsetDe(tz, fecha){                  // "GMT-03:00" -> "-0300"
 }
 function generarICS(habits, desde, url, feriados, ahora, tz){
   const grupos = new Map();
-  for(const h of porHora(habits.filter(h => h.hora && HORA.test(h.hora)))){
+  for(const h of porHora(habits.filter(h => esHora(h.hora)))){
     if(!grupos.has(h.hora)) grupos.set(h.hora, []);
     grupos.get(h.hora).push(h);
   }
@@ -752,7 +753,7 @@ function generarICS(habits, desde, url, feriados, ahora, tz){
   while(isWeekend(iso(ini)) || libresSet.has(iso(ini))) ini = addDays(ini, 1);   // el primer evento cae en día hábil
   const dia = d => iso(d).replace(/-/g, "");
   const hhmm = m => String(Math.floor(m / 60)).padStart(2, "0") + String(m % 60).padStart(2, "0") + "00";
-  const texto = t => t.replace(/[\\;,]/g, c => "\\" + c).replace(/\n/g, "\\n");
+  const texto = t => t.replace(/[\\;,]/g, c => "\\" + c).replace(/\r?\n|\r/g, "\\n");
   const octetos = ch => { const c = ch.codePointAt(0); return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; };
   const doblar = linea => {                 // RFC 5545: líneas de hasta 75 octetos
     let out = "", tramo = "", n = 0, max = 75;
@@ -777,7 +778,7 @@ function generarICS(habits, desde, url, feriados, ahora, tz){
   for(const [hora, hs] of grupos){
     const desdeMin = minutos(hora);
     let finMin = Math.max(...hs.map(h => {
-      const f = h.hasta && HORA.test(h.hasta) ? minutos(h.hasta) : desdeMin + 15;
+      const f = esHora(h.hasta) && h.hasta !== hora ? minutos(h.hasta) : desdeMin + 15;
       return f <= desdeMin ? f + 1440 : f;
     }));
     const finDia = finMin >= 1440 ? addDays(ini, 1) : ini;
@@ -882,7 +883,7 @@ function monthWheel(y, m){
       const tx = texOf(st);
       cells += `<path class="cell" d="${sector(C,C,r0,r1,a0,a1)}" fill="${tx||fillOf(st)}" `
             + `stroke="var(--surface)" stroke-width="0.6" data-d="${ds}" data-h="${h.id}">`
-            + `<title>${d} · ${h.name} · ${stName(st)}</title></path>`;
+            + `<title>${d} · ${esc(h.name)} · ${stName(st)}</title></path>`;
     });
     if(d % 2 === 1 || dim <= 28 || d === todayD){
       const [lx,ly] = polar(C,C,R+11,(d-.5)*step);
@@ -1013,7 +1014,7 @@ function vHoy(){
     /* Enganche 5: el hábito con meta acepta toque largo para el valor real */
     const meta = g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
     return `<div class="hrow">
-      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${h.name}">${stGlyph(st)}</button>
+      <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${esc(h.name)}">${stGlyph(st)}</button>
       <div class="hmeta">
         <div class="hname">${esc(h.name)}</div>
         <div class="hsub">${ya}${hora}<span>${stName(st)}</span>${meta}${k>1?`<span>🔥 ${k} días</span>`:""}${danger?`<span class="warn">no podés fallar</span>`:""}</div>
@@ -1256,8 +1257,8 @@ function onAct(e){
       /* Alterna hoy entre libre y hábil: saca o agrega en la lista que corresponda */
       const quitar = (arr, ds) => { const i = arr.indexOf(ds); if(i >= 0) arr.splice(i, 1); return i >= 0; };
       S.feriados ||= []; S.laborables ||= [];
-      if(esFeriado(TODAY)){ if(!quitar(S.feriados, TODAY)) S.laborables.push(TODAY); }
-      else if(!quitar(S.laborables, TODAY)) S.feriados.push(TODAY);
+      if(esFeriado(TODAY)){ quitar(S.feriados, TODAY); if(esFeriado(TODAY)) S.laborables.push(TODAY); }
+      else { quitar(S.laborables, TODAY); if(!esFeriado(TODAY)) S.feriados.push(TODAY); }
       save(); render(); break;
     }
     case "ics": doICS(); break;
@@ -1352,15 +1353,20 @@ function editHabit(hid){
     <button class="btn" data-x="o" style="margin:0">Guardar</button></div>`);
   const $ = id => modal.querySelector(id);
   $('[data-x="c"]').onclick = closeSheet;
-  $('[data-x="o"]').onclick = () => {
+  const guardar = () => {
     const nombre = $("#en").value.trim(), hora = $("#eh").value, hasta = $("#ef").value;
     if(!nombre){ toast("El hábito necesita un nombre"); return; }
     if(hasta && !hora){ toast("Poné primero la hora de inicio"); return; }
+    if((hora && !esHora(hora)) || (hasta && !esHora(hasta))){ toast("Escribí la hora como 07:30"); return; }
+    if(hasta && hasta === hora){ toast("El fin tiene que ser distinto del inicio"); return; }
     h.name = nombre;
     if(hora) h.hora = hora; else delete h.hora;
     if(hora && hasta) h.hasta = hasta; else delete h.hasta;
     closeSheet(); save(); render();
   };
+  $('[data-x="o"]').onclick = guardar;
+  modal.querySelectorAll("input").forEach(i => i.addEventListener("keydown", e => { if(e.key === "Enter") guardar(); }));
+  $("#en").focus();
 }
 function addListItem(kind){
   const i = document.getElementById(kind === "less" ? "newLess" : "newMore"); if(!i) return;
@@ -1393,7 +1399,10 @@ function doICS(){
   const url = location.href.split(/[?#]/)[0];
   const libres = [...FERIADOS_AR, ...(S.feriados || [])].filter(esFeriado);
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Argentina/Buenos_Aires";
-  descargar(generarICS(S.habits, TODAY, url, libres, new Date(), tz), "mi-prime-recordatorios.ics", "text/calendar");
+  let ics;
+  try{ ics = generarICS(S.habits, TODAY, url, libres, new Date(), tz); }
+  catch(e){ toast("Este navegador no pudo armar el calendario"); return; }
+  descargar(ics, "mi-prime-recordatorios.ics", "text/calendar");
   sheet(`<h3>Recordatorios listos</h3>
     <p class="sub">Se descargó <b>mi-prime-recordatorios.ics</b>: ${n} ${n===1?"aviso":"avisos"} de lunes a viernes, sin feriados.</p>
     <p style="font-size:14px;line-height:1.5;margin:0 0 10px">${ICS_PASOS}</p>
@@ -1417,7 +1426,9 @@ function prepararRespaldo(texto){
     if(!esFecha(d) || !esObj(dia) || !Object.values(dia).every(v => estados.has(v)))
       throw new Error(`Marca inválida el ${d}.`);
   }
-  if(!data.habits.every(h => (h.hora == null || HORA.test(h.hora)) && (h.hasta == null || HORA.test(h.hasta))))
+  if(!data.habits.every(h => h.id == null || (typeof h.id === "string" && /^[\w-]+$/.test(h.id))))
+    throw new Error("Hay un hábito con un id inválido.");
+  if(!data.habits.every(h => (h.hora == null || esHora(h.hora)) && (h.hasta == null || esHora(h.hasta))))
     throw new Error("Hay un horario mal escrito.");
   for(const k of ["feriados", "laborables"])
     if(data[k] != null && !(Array.isArray(data[k]) && data[k].every(esFecha))) throw new Error(`El campo "${k}" está roto.`);
@@ -1519,6 +1530,12 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b
 
 /* ---------- go ---------- */
 render();
+/* La PWA puede quedar abierta de un día para el otro (se marca a la noche y se
+   retoma a la mañana). Si cambió la fecha, se recarga: así corre el cierre
+   automático y las marcas van al día que corresponde. */
+document.addEventListener("visibilitychange", () => {
+  if(!document.hidden && iso(new Date()) !== TODAY) location.reload();
+});
 if(autoFilled > 0){
   setTimeout(() => toast(`Se cerraron ${autoFilled} marcas de días pasados`), 500);
 }
@@ -1571,7 +1588,7 @@ function hideInstallBar(){ document.getElementById("installBar")?.remove(); }
 
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
-  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, pendientes, porHora, generarICS, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
+  /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN };
 </script>
 </body>
 </html>

@@ -382,6 +382,8 @@ console.log('\n== 18. Importar respaldo: valida antes de guardar ==');
     ['algo que no es JSON', 'hola', 'No es un archivo JSON'],
     ['una marca con un estado inventado', JSON.stringify(estado({ marks: { '2026-10-01': { hA: 'rojo' } } })), 'Marca inválida el 2026-10-01'],
     ['un horario imposible', JSON.stringify(estado({ habits: [{ id: 'hA', name: 'Leer', order: 0, hora: '25:00' }] })), 'Hay un horario mal escrito'],
+    ['un horario que no es texto', JSON.stringify(estado({ habits: [{ id: 'hA', name: 'Leer', order: 0, hora: ['07:00'] }] })), 'Hay un horario mal escrito'],
+    ['un id con comillas', JSON.stringify(estado({ habits: [{ id: 'a"b', name: 'Leer', order: 0 }] })), 'Hay un hábito con un id inválido'],
   ];
   for (const [que, contenido, motivo] of malos) {
     await importar(contenido);
@@ -398,6 +400,13 @@ console.log('\n== 18. Importar respaldo: valida antes de guardar ==');
   await p.locator('[data-x="o"]').click().catch(() => {}); await p.waitForTimeout(200);
   const final = await p.evaluate(() => JSON.parse(localStorage.getItem('miPrime.v1')).habits.map(h => h.name).join());
   ok('confirmar reemplaza los datos (' + final + ')', final === 'Uno,Dos,Tres');
+  // Un nombre con HTML se muestra como texto, no se ejecuta
+  const trampa = '"><img src=x onerror="window.__xss=1">';
+  await importar(JSON.stringify(estado({ habits: [{ id: 'hX', name: trampa, order: 0 }] })));
+  await p.locator('[data-x="o"]').click().catch(() => {}); await p.waitForTimeout(200);
+  await ir(p, 'hoy'); await ir(p, 'mes');
+  ok('un nombre con HTML no se ejecuta en Hoy ni en Mes', await p.evaluate(() => window.__xss === undefined)
+    && (await p.locator('.wheelwrap svg title').first().textContent()).includes('<img'));
   await c.close();
 }
 
@@ -438,6 +447,12 @@ console.log('\n== 20. Horarios: editar, ordenar el día y "ahora" ==');
   await p.locator('[data-x="o"]').click(); await p.waitForTimeout(150);
   ok('no acepta un "hasta" sin "desde"', (await p.evaluate(() => window.__prime.S.habits[0].hora)) === '11:30'
     && (await p.evaluate(() => document.body.innerText.includes('Poné primero la hora de inicio'))));
+  await p.fill('#eh', '10:00'); await p.fill('#ef', '10:00');
+  await p.locator('#ef').press('Enter'); await p.waitForTimeout(150);
+  ok('no acepta un fin igual al inicio (y Enter guarda)', (await p.evaluate(() => window.__prime.S.habits[0].hasta)) === '12:30'
+    && (await p.evaluate(() => document.body.innerText.includes('El fin tiene que ser distinto del inicio'))));
+  ok('un bloque con fin igual al inicio dura 15 minutos, no el día entero',
+    await p.evaluate(() => { const P = window.__prime, h = { hora: '10:00', hasta: '10:00' }; return P.esAhora(h, 600) && !P.esAhora(h, 18 * 60); }));
   await c.close();
 }
 
@@ -525,7 +540,21 @@ console.log('\n== 23. Recordatorios en el calendario (.ics) ==');
   ok('un bloque que cruza la medianoche termina al día siguiente', cruza.includes(':20261015T001500') && cruza.includes('TZOFFSETTO:-0300'));
 }
 
-console.log('\n== 24. Capturas ==');
+console.log('\n== 24. La app abierta de un día para el otro ==');
+{
+  // Se marca a la noche, el teléfono se bloquea y la app se retoma a la mañana sin recargar.
+  const st = estado({ lastClosed: '2026-10-13', habits: [{ id: 'hA', name: 'Leer', order: 0, hora: '23:30' }] });
+  const { p, c } = await abrirEn(HOY_FIJO, st);
+  await c.clock.setFixedTime(new Date('2026-10-15T07:10:00'));      // jueves a la mañana
+  await Promise.all([p.waitForEvent('load'), p.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))]);
+  await p.waitForTimeout(250);
+  const cab = (await p.locator('.card').first().innerText()).split('\n')[0];
+  ok('al volver a la app con otra fecha, se recarga en el día nuevo: ' + JSON.stringify(cab), /jue 15/i.test(cab));
+  ok('y pregunta por lo que quedó sin marcar ayer', await p.locator('.pq').count() === 2);
+  await c.close();
+}
+
+console.log('\n== 25. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
