@@ -1530,7 +1530,7 @@ function vComida(){
       <button class="btn" data-act="cfoto" style="margin:0">Sacar foto</button>
       <button class="btn ghost" data-act="cgaleria" style="margin:0">Elegir foto</button></div>
     <button class="btn ghost" data-act="cmano">Agregar a mano</button>
-    ${conClave ? "" : `<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">Para que Claude lea las fotos falta cargar tu clave de Anthropic (abajo, en “Fotos con Claude”).</p>`}</div>`;
+    ${conClave ? "" : `<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">Para que Claude calcule desde una foto o desde lo que escribís, falta cargar tu clave de Anthropic (abajo, en “Calorías con Claude”).</p>`}</div>`;
   const lista = `<div class="card"><div class="card-t">Hoy</div>${hoy.length ? hoy.map((c, i) => `<div class="comida">
       <span class="hm">${esc(c.hora || "")}</span><span class="n">${esc(c.nombre)}</span>
       <b>${fmt(c.kcal)} kcal</b><span style="color:var(--muted);font-size:13px;white-space:nowrap">${fmt(c.prot)} g</span>
@@ -1551,10 +1551,10 @@ function vComida(){
       <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
         <button class="btn ghost" data-act="cpeso" style="margin:0">Registrar peso</button>
         <button class="btn ghost" data-act="cperfil" style="margin:0">Editar perfil</button></div></div>` : "";
-  const ia = `<div class="card"><div class="card-t">Fotos con Claude</div>
-    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto se manda a Claude Opus 5.5 (Anthropic), que estima calorías y proteína; no se guarda en la app.
-      Cuesta unos 2 a 3 centavos de dólar por foto y se cobra en tu cuenta de Anthropic.</p>
-    <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (console.anthropic.com → API keys)."}</p>
+  const ia = `<div class="card"><div class="card-t">Calorías con Claude</div>
+    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto, o lo que escribís en “Agregar a mano” sin poner las calorías, se manda a Claude Opus 5.5 (Anthropic), que estima calorías y proteína; la foto no se guarda en la app.
+      Cuesta unos 2 a 3 centavos de dólar cada vez (algo menos con texto) y se cobra en tu cuenta de Anthropic.</p>
+    <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
     <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>`;
   return perfil + resumen + acciones + lista + semana + cuerpo + ia;
 }
@@ -1605,20 +1605,36 @@ function registrarPeso(){
     toast(`Peso ${fmt1(n)} kg · meta ${fmt(metasNutricion(S.perfil).kcal)} kcal`);
   };
 }
+/* Con clave y sin calorías, el botón es "Calcular": Claude estima a partir de lo escrito */
 function comidaAMano(){
+  const conClave = !!claveIA();
   sheet(`<h3>Agregar a mano</h3>
-    <label class="campo">Qué comiste</label><input type="text" id="cNombre" maxlength="60" placeholder="Ej.: 2 empanadas de carne">
+    <label class="campo">Qué comiste</label><input type="text" id="cNombre" maxlength="120" placeholder="Ej.: 2 empanadas de carne">
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo">Calorías (kcal)</label><input type="number" id="cKcal" inputmode="numeric" min="0" max="5000"></div>
       <div><label class="campo">Proteína (g)</label><input type="number" id="cProt" inputmode="numeric" min="0" max="400"></div></div>
+    <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">${conClave
+      ? "¿No sabés las calorías? Dejalas vacías y las calcula Claude con lo que escribiste."
+      : "Con tu clave de Anthropic (en “Calorías con Claude”), Claude las calcula si no las sabés."}</p>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
-  modal.querySelector("#cNombre").focus();
+  const cNombre = modal.querySelector("#cNombre"), cKcal = modal.querySelector("#cKcal"), boton = modal.querySelector('[data-x="o"]');
+  const calcula = () => conClave && cKcal.value.trim() === "";
+  const etiqueta = () => { if(!boton.disabled) boton.textContent = calcula() ? "Calcular" : "Agregar"; };
+  cKcal.addEventListener("input", etiqueta); etiqueta();
+  cNombre.focus();
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
-  modal.querySelector('[data-x="o"]').onclick = () => {
-    const nombre = modal.querySelector("#cNombre").value.trim(), kcal = Math.round(Number(modal.querySelector("#cKcal").value)),
-          prot = Math.round(Number(modal.querySelector("#cProt").value) || 0);
+  boton.onclick = async () => {
+    const nombre = cNombre.value.trim();
+    if(calcula()){
+      if(!nombre){ toast("Escribí qué comiste"); return; }
+      boton.disabled = true; boton.textContent = "Calculando…";
+      try{ mostrarAnalisis(await analizarComida(null, nombre), { origen: "texto", nombre }); }
+      catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
+      return;
+    }
+    const kcal = Math.round(Number(cKcal.value)), prot = Math.round(Number(modal.querySelector("#cProt").value) || 0);
     if(!nombre || !(kcal >= 0 && kcal <= 5000) || !(prot >= 0 && prot <= 400)){ toast("Poné qué comiste y las calorías"); return; }
-    closeSheet(); guardarComida({ nombre, kcal, prot, origen: "mano" });
+    closeSheet(); guardarComida({ nombre: nombre.slice(0, 80), kcal, prot, origen: "mano" });
   };
 }
 
@@ -2275,22 +2291,23 @@ function caminando(){ return S.habits.find(h => h.auto?.source === "steps")?.nam
 sincronizarPasos();
 
 /* =========================================================================
-   9. COMIDA CON CLAUDE: foto → calorías y proteína
+   9. COMIDA CON CLAUDE: foto o texto → calorías y proteína
    -------------------------------------------------------------------------
-   La foto (achicada a 1024 px) va a Claude Opus 5.5 por el SDK oficial de
-   Anthropic, empaquetado en vendor/anthropic-sdk.js (npm run vendor) y cargado
-   recién la primera vez que se analiza una foto. La respuesta viene con un JSON
+   La foto (achicada a 1024 px), o lo escrito en "Agregar a mano" sin
+   calorías, va a Claude Opus 5.5 por el SDK oficial de Anthropic, empaquetado
+   en vendor/anthropic-sdk.js (npm run vendor) y cargado recién la primera vez
+   que se usa. La respuesta viene con un JSON
    schema fijo; si Claude no puede, el fallback del servidor reintenta con otro
    modelo. La clave es de la persona, vive solo en este celular y NO va en el
    respaldo (por eso no está en S).
    ========================================================================= */
 const CLAVE_IA = "miPrime.claveIA", MODELO_COMIDA = "claude-opus-5-5";
-const PROMPT_COMIDA = `Sos nutricionista y estimás calorías y proteínas de comidas a partir de una foto, para alguien en Argentina que quiere bajar de peso sin perder músculo.
-- Identificá cada alimento o bebida que se ve. Estimá la porción con las referencias de la foto (plato, cubiertos, manos, envases) y escribila en gramos o en medidas caseras.
+const PROMPT_COMIDA = `Sos nutricionista y estimás calorías y proteínas de comidas a partir de una foto o de lo que la persona escribe, para alguien en Argentina que quiere bajar de peso sin perder músculo.
+- Identificá cada alimento o bebida. Con foto, estimá la porción con sus referencias (plato, cubiertos, manos, envases). Con texto, usá la cantidad que dice o, si no la dice, una porción típica en Argentina. Escribí la porción en gramos o en medidas caseras.
 - Calculá las kcal y los gramos de proteína de esa porción con valores de tablas nutricionales estándar. Sumá lo que no se ve pero suele llevar (aceite de cocción, manteca, aderezos) como estimación razonable y aclaralo en la nota.
 - Si la persona escribe una aclaración, manda sobre lo que parece la foto.
-- Si en la foto no hay comida, devolvé items vacíos y explicalo en la nota.
-- confianza: "alta" si se ve claro qué es y cuánto; "baja" si la porción o los ingredientes son dudosos.
+- Si no hay comida en la foto o en el texto, devolvé items vacíos y explicalo en la nota.
+- confianza: "alta" si está claro qué es y cuánto; "baja" si la porción o los ingredientes son dudosos.
 - Nombres cortos en castellano rioplatense (por ejemplo "Milanesa de carne", "Puré de papas").`;
 const ESQUEMA_COMIDA = {
   type: "object",
@@ -2306,7 +2323,7 @@ const ESQUEMA_COMIDA = {
 function claveIA(){ try{ return localStorage.getItem(CLAVE_IA) || ""; }catch(e){ return ""; } }
 function editarClave(){
   sheet(`<h3>Tu clave de Anthropic</h3>
-    <p class="sub">Creala en console.anthropic.com → API keys (empieza con sk-ant-). Se guarda solo en este celular y no viaja en el respaldo.</p>
+    <p class="sub">Creala en platform.claude.com → Claves de API (empieza con sk-ant-). Se guarda solo en este celular y no viaja en el respaldo.</p>
     <input type="password" id="clave" autocomplete="off" placeholder="sk-ant-…" value="">
     <div class="row2">${claveIA() ? `<button class="btn ghost danger" data-x="b">Borrar clave</button>` : `<button class="btn ghost" data-x="c">Cancelar</button>`}
       <button class="btn" data-x="o">Guardar</button></div>`);
@@ -2356,7 +2373,7 @@ function prepararFoto(foto){
   modal.querySelector('[data-x="o"]').onclick = async e => {
     const boton = e.currentTarget, aclaracion = modal.querySelector("#aclara").value.trim();
     boton.disabled = true; boton.textContent = "Analizando…";
-    try{ mostrarAnalisis(await analizarFoto(foto.base64, aclaracion)); }
+    try{ mostrarAnalisis(await analizarComida(foto.base64, aclaracion)); }
     catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
   };
 }
@@ -2371,7 +2388,8 @@ function cargarSDK(){
     document.head.appendChild(s);
   });
 }
-async function analizarFoto(base64, aclaracion){
+/* Con foto (base64), el texto es una aclaración; sin foto, es la descripción de lo que comió */
+async function analizarComida(base64, texto){
   const { Anthropic, betaJSONSchemaOutputFormat } = await cargarSDK();
   const client = new Anthropic({ apiKey: claveIA(), dangerouslyAllowBrowser: true, timeout: 120000, maxRetries: 1 });
   const msg = await client.beta.messages.parse({
@@ -2381,9 +2399,10 @@ async function analizarFoto(base64, aclaracion){
     fallbacks: "default",
     system: PROMPT_COMIDA,
     output_config: { format: betaJSONSchemaOutputFormat(ESQUEMA_COMIDA) },
-    messages: [{ role: "user", content: [
+    messages: [{ role: "user", content: base64 ? [
       { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-      { type: "text", text: aclaracion ? `Aclaración: ${aclaracion}` : "Estimá las calorías y proteínas de esta comida." }] }]
+      { type: "text", text: texto ? `Aclaración: ${texto}` : "Estimá las calorías y proteínas de esta comida." }]
+      : [{ type: "text", text: `Comí: ${texto}\nEstimá las calorías y proteínas.` }] }]
   });
   if(msg.stop_reason === "refusal") throw new Error("rechazo");
   if(!msg.parsed_output) throw new Error("sin-respuesta");
@@ -2392,7 +2411,7 @@ async function analizarFoto(base64, aclaracion){
 function mensajeErrorIA(e){
   const A = window.AnthropicSDK?.Anthropic;
   if(e?.message === "sin-sdk") return "No se pudo cargar Claude: revisá la conexión";
-  if(e?.message === "rechazo") return "Claude no pudo analizar esta foto";
+  if(e?.message === "rechazo") return "Claude no pudo analizar esa comida";
   if(e?.message === "sin-respuesta") return "Claude respondió algo que no se pudo leer: probá de nuevo";
   if(A){
     if(e instanceof A.AuthenticationError) return "La clave de Anthropic no es válida";
@@ -2402,13 +2421,13 @@ function mensajeErrorIA(e){
     if(e instanceof A.BadRequestError) return /credit/i.test(e.message) ? "Tu cuenta de Anthropic no tiene saldo" : "Claude no aceptó el pedido: " + e.message;
     if(e instanceof A.APIError) return `Claude no respondió (${e.status ?? "error"}): probá en un rato`;
   }
-  return "No se pudo analizar la foto";
+  return "No se pudo calcular: probá de nuevo";
 }
-function mostrarAnalisis(r){
+function mostrarAnalisis(r, { origen = "foto", nombre } = {}){
   const filas = r.items.map((it, i) => `<div class="item"><span>${esc(it.nombre)}<small>${esc(it.porcion)}</small></span>
       <input type="number" data-k="kcal" data-i="${i}" inputmode="numeric" min="0" value="${it.kcal}" aria-label="Calorías de ${esc(it.nombre)}">
       <input type="number" data-k="prot" data-i="${i}" inputmode="numeric" min="0" value="${it.prot}" aria-label="Proteína de ${esc(it.nombre)}"></div>`).join("");
-  sheet(`<h3>Lo que ve Claude</h3>
+  sheet(`<h3>${origen === "foto" ? "Lo que ve Claude" : "Lo que calcula Claude"}</h3>
     <p class="sub">Confianza ${esc(r.confianza)}. Corregí los números si hace falta.</p>
     ${r.items.length ? `<div class="item" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em"><span>Comida</span><span style="text-align:right">kcal</span><span style="text-align:right">prot g</span></div>${filas}` : ""}
     ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
@@ -2427,7 +2446,7 @@ function mostrarAnalisis(r){
   modal.querySelector('[data-x="o"]')?.addEventListener("click", () => {
     const t = total();
     closeSheet();
-    guardarComida({ nombre: r.items.map(i => i.nombre).join(", ").slice(0, 80), kcal: t.kcal, prot: t.prot, origen: "foto",
+    guardarComida({ nombre: (nombre || r.items.map(i => i.nombre).join(", ")).slice(0, 80), kcal: t.kcal, prot: t.prot, origen,
                     detalle: r.items.map(({ nombre, porcion, kcal, prot }) => ({ nombre, porcion, kcal, prot })) });
   });
 }

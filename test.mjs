@@ -961,6 +961,8 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   ok('y guarda el perfil y el peso de hoy', S1.perfil.sexo === 'h' && S1.perfil.ritmo === 0.5 && S1.perfil.actividad === 1.55 && S1.pesos[HOY_FIJO] === 73.2);
   ok('dice cuánto falta: 3,2 kg, unas 7 semanas', /faltan 3,2 kg \(≈ 7 semanas a 0,5 kg por semana\)/.test(await p.locator('#view').innerText()));
   await p.locator('[data-act="cmano"]').click();
+  ok('sin clave, a mano pide las calorías y avisa que con la clave las calcula Claude', (await p.locator('.sheet [data-x="o"]').innerText()) === 'Agregar'
+    && /Claude las calcula/.test(await p.locator('.sheet').innerText()));
   await p.locator('#cNombre').fill('2 empanadas de carne'); await p.locator('#cKcal').fill('600'); await p.locator('#cProt').fill('24');
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('agregar a mano suma al día: 600 kcal, quedan 1.280', /600/.test(await p.locator('.hero').innerText()) && /quedan 1\.280/.test(await p.locator('.hero').innerText())
@@ -997,6 +999,30 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   ok('se guarda como una comida con su detalle: el día suma 1.300 kcal y 64 g', hoy.length === 2 && hoy[1].kcal === 700 && hoy[1].prot === 40
     && hoy[1].origen === 'foto' && hoy[1].detalle.length === 2 && /1\.300/.test(await p.locator('.hero').innerText())
     && /64 g de 130 g/.test(await p.locator('#view').innerText()));
+  // A mano sin calorías: las calcula Claude con lo escrito
+  respuesta = { status: 200, body: { ...respuesta.body, content: [{ type: 'text', text: JSON.stringify({ items: [
+    { nombre: 'Tostadas con queso untable', porcion: '2 tostadas', kcal: 210, proteina_g: 8 },
+    { nombre: 'Café con leche', porcion: '1 taza', kcal: 90, proteina_g: 5 }], nota: '', confianza: 'alta' }) }] } };
+  const antes = pedidos.length;
+  await p.locator('[data-act="cmano"]').click();
+  ok('con clave y sin calorías, el botón es "Calcular"', (await p.locator('.sheet [data-x="o"]').innerText()) === 'Calcular');
+  await p.locator('#cKcal').fill('100');
+  ok('si ponés las calorías, vuelve a "Agregar"', (await p.locator('.sheet [data-x="o"]').innerText()) === 'Agregar');
+  await p.locator('#cKcal').fill('');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('sin nombre no le pregunta nada a Claude', pedidos.length === antes && await p.locator('.sheet #cNombre').count() === 1);
+  await p.locator('#cNombre').fill('2 tostadas con queso untable y café con leche');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
+  const qt = pedidos.at(-1), bloques = qt?.body.messages[0].content || [];
+  ok('manda solo el texto a Claude Opus 5.5, sin foto', pedidos.length === antes + 1 && qt.body.model === 'claude-opus-5-5'
+    && !bloques.some(b => b.type === 'image') && /Comí: 2 tostadas con queso untable y café con leche/.test(bloques[0]?.text)
+    && /lo que la persona escribe/.test(qt.body.system));
+  ok('muestra lo que calcula Claude: 300 kcal, 13 g, y se puede corregir', /Lo que calcula Claude/.test(await p.locator('.sheet').innerText())
+    && /300 kcal · 13 g/.test(await p.locator('#totalIA').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const hoyT = await p.evaluate(d => window.__prime.S.comidas[d], HOY_FIJO);
+  ok('se guarda con el nombre que escribiste y su detalle', hoyT.length === 3 && hoyT[2].nombre === '2 tostadas con queso untable y café con leche'
+    && hoyT[2].kcal === 300 && hoyT[2].prot === 13 && hoyT[2].origen === 'texto' && hoyT[2].detalle.length === 2);
   // Errores claros
   respuesta = { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } };
   const [fc2] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="cgaleria"]').click()]);
@@ -1007,7 +1033,7 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
     && (await p.locator('.sheet [data-x="o"]').innerText()) === 'Reintentar');
   await p.locator('.sheet [data-x="c"]').click();
   await p.locator('[data-act="cborrar"][data-i="0"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
-  ok('borrar una comida pide confirmación y la saca', (await p.evaluate(d => window.__prime.S.comidas[d].length, HOY_FIJO)) === 1);
+  ok('borrar una comida pide confirmación y la saca', (await p.evaluate(d => window.__prime.S.comidas[d].length, HOY_FIJO)) === 2);
   await p.locator('[data-act="cpeso"]').click(); await p.locator('#pPesoHoy').fill('72.8'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
   const S2 = await p.evaluate(() => window.__prime.S);
   ok('registrar el peso recalcula la meta', S2.perfil.peso === 72.8 && S2.pesos[HOY_FIJO] === 72.8 && /de 1\.870 kcal/.test(await p.locator('.hero').innerText()));
