@@ -8,12 +8,15 @@
     "test": "node test.mjs",
     "icons": "node gen-icons.mjs",
     "serve": "node --eval \"import('node:http').then(async h=>{const{readFile}=await import('node:fs/promises');const{extname,resolve}=await import('node:path');const M={'.html':'text/html','.js':'text/javascript','.png':'image/png','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'};h.createServer(async(q,s)=>{let p=q.url.split('?')[0];if(p==='/')p='/index.html';try{const b=await readFile(resolve(process.cwd(),'.'+p));s.writeHead(200,{'content-type':M[extname(p)]||'text/plain'}).end(b)}catch{s.writeHead(404).end()}}).listen(8080,()=>console.log('http://localhost:8080'))})\"",
-    "www": "node -e \"const fs=require('fs');fs.rmSync('www',{recursive:true,force:true});fs.mkdirSync('www/icons',{recursive:true});for(const f of ['index.html','manifest.webmanifest'])fs.copyFileSync(f,'www/'+f);for(const f of fs.readdirSync('icons'))fs.copyFileSync('icons/'+f,'www/icons/'+f)\"",
+    "www": "node -e \"const fs=require('fs');fs.rmSync('www',{recursive:true,force:true});for(const d of ['icons','vendor']){fs.mkdirSync('www/'+d,{recursive:true});for(const f of fs.readdirSync(d))fs.copyFileSync(d+'/'+f,'www/'+d+'/'+f)}for(const f of ['index.html','manifest.webmanifest'])fs.copyFileSync(f,'www/'+f)\"",
+    "vendor": "esbuild ia-entrada.mjs --bundle --format=iife --global-name=AnthropicSDK --platform=browser --target=es2020 --minify --legal-comments=eof --outfile=vendor/anthropic-sdk.js",
     "android:sync": "npm run www && npx cap sync android",
     "android:apk": "npm run android:sync && cd android && ./gradlew assembleRelease"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@capacitor/cli": "8.5.3",
+    "esbuild": "0.28.2",
     "playwright": "^1.49.0"
   },
   "dependencies": {

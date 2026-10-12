@@ -46,7 +46,7 @@ await page.waitForTimeout(300);
 console.log('\n== 1. Carga y pantalla Hoy ==');
 ok('sin errores de consola: ' + JSON.stringify(errors), errors.length === 0);
 ok('7 hábitos renderizados', (await page.locator('.hrow').count()) === 7);
-ok('nav con 5 pestañas (Hoy, Mes, Semanas, Pasos, Más)', (await page.locator('nav button').count()) === 5);
+ok('nav con 6 pestañas (Hoy, Mes, Semanas, Pasos, Comida, Más)', (await page.locator('nav button').count()) === 6);
 
 console.log('\n== 2. Marcado rápido (1 toque = verde) ==');
 await page.locator('.dot').first().click();
@@ -917,7 +917,112 @@ console.log('\n== 29. App de Android: pasos desde Health Connect ==');
   await c.close();
 }
 
-console.log('\n== 30. Capturas ==');
+console.log('\n== 30. Comida: metas de calorías y proteína ==');
+{
+  const L = cargarLogica(estado());
+  const yo = { sexo: 'h', edad: 39, altura: 164, peso: 73.2, pesoMeta: 70, ritmo: 0.5, actividad: 1.55 };
+  const m = L.metasNutricion(yo);
+  ok(`Mifflin-St Jeor: base 1.567, gasto 2.429, −550 para 0,5 kg/semana → 1.880 kcal y 130 g, ~7 semanas: ${JSON.stringify(m)}`,
+    m.tmb === 1567 && m.gasto === 2429 && m.deficit === 550 && m.kcal === 1880 && m.prot === 130 && m.semanas === 7 && m.faltan === 3.2);
+  ok('con la fórmula de mujer el gasto base baja 166 kcal', L.metasNutricion({ ...yo, sexo: 'm' }).tmb === 1401);
+  ok('en el peso meta no hay déficit: es mantener', L.metasNutricion({ ...yo, peso: 70 }).deficit === 0 && L.metasNutricion({ ...yo, peso: 70 }).semanas === 0);
+  ok('nunca por debajo del piso de seguridad (1.500 hombre)', L.metasNutricion({ ...yo, peso: 45, altura: 150, edad: 80, actividad: 1.2, ritmo: 0.75, pesoMeta: 40 }).kcal === 1500);
+  ok('perfil incompleto: no inventa una meta', L.metasNutricion({ ...yo, edad: undefined }) === null && L.metasNutricion(undefined) === null);
+  ok('suma las comidas del día', JSON.stringify(L.totalComidas([{ kcal: 600, prot: 24 }, { kcal: 700, prot: 40 }])) === '{"kcal":1300,"prot":64}');
+  const n = L.normalizarAnalisis({ items: [{ nombre: ' Milanesa ', porcion: '1', kcal: 450.6, proteina_g: 30 }, { nombre: '', kcal: 5 },
+    { nombre: 'x', kcal: -3, proteina_g: '9' }, { nombre: 'y', kcal: 1e9, proteina_g: 1e9 }], nota: 'ok', confianza: 'rara' });
+  ok('lo que dice Claude se limpia: sin nombres vacíos, sin negativos ni números absurdos',
+    n.items.length === 3 && n.items[0].nombre === 'Milanesa' && n.items[0].kcal === 451 && n.items[1].kcal === 0 && n.items[1].prot === 9
+    && n.items[2].kcal === 5000 && n.confianza === 'baja');
+}
+
+console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simulado) ==');
+{
+  const { p, c, errs } = await abrirEn(HOY_FIJO, estado());
+  const pedidos = [];
+  let respuesta = { status: 200, body: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null,
+    usage: { input_tokens: 1300, output_tokens: 400 }, content: [{ type: 'text', text: JSON.stringify({ items: [
+      { nombre: 'Milanesa de carne', porcion: '1 grande (180 g)', kcal: 450, proteina_g: 35 },
+      { nombre: 'Puré de papas', porcion: '1 taza', kcal: 220, proteina_g: 5 }], nota: 'Sumé una cucharada de aceite.', confianza: 'media' }) }] } };
+  await c.route('https://api.anthropic.com/**', async route => {
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    pedidos.push({ headers: route.request().headers(), body: route.request().postDataJSON(), url: route.request().url() });
+    await route.fulfill({ status: respuesta.status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(respuesta.body) });
+  });
+  await ir(p, 'comida');
+  ok('sin perfil, pide completarlo', await p.locator('[data-act="cperfil"]').count() === 1 && /Completá tu perfil/.test(await p.locator('#view').innerText()));
+  await p.locator('[data-act="cperfil"]').first().click();
+  for (const [id, v] of [['#pEdad', '39'], ['#pAltura', '164'], ['#pPeso', '73.2'], ['#pMeta', '70']]) await p.locator(id).fill(v);
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const S1 = await p.evaluate(() => window.__prime.S);
+  ok('el perfil calcula 1.880 kcal y 130 g por día', /de 1\.880 kcal · quedan 1\.880/.test(await p.locator('.hero').innerText())
+    && /0 g de 130 g de proteína/.test(await p.locator('#view').innerText()));
+  ok('y guarda el perfil y el peso de hoy', S1.perfil.sexo === 'h' && S1.perfil.ritmo === 0.5 && S1.perfil.actividad === 1.55 && S1.pesos[HOY_FIJO] === 73.2);
+  ok('dice cuánto falta: 3,2 kg, unas 7 semanas', /faltan 3,2 kg \(≈ 7 semanas a 0,5 kg por semana\)/.test(await p.locator('#view').innerText()));
+  await p.locator('[data-act="cmano"]').click();
+  await p.locator('#cNombre').fill('2 empanadas de carne'); await p.locator('#cKcal').fill('600'); await p.locator('#cProt').fill('24');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('agregar a mano suma al día: 600 kcal, quedan 1.280', /600/.test(await p.locator('.hero').innerText()) && /quedan 1\.280/.test(await p.locator('.hero').innerText())
+    && await p.locator('.comida').count() === 1);
+  // Foto: sin clave, primero pide la clave
+  await p.locator('[data-act="cfoto"]').click(); await p.waitForTimeout(100);
+  ok('para la foto primero pide la clave de Anthropic', await p.locator('.sheet #clave').count() === 1);
+  await p.locator('#clave').fill('no-es-clave'); await p.locator('.sheet [data-x="o"]').click();
+  ok('rechaza algo que no es una clave', await p.locator('.sheet #clave').count() === 1 && (await p.evaluate(() => localStorage.getItem('miPrime.claveIA'))) === null);
+  const CLAVE = 'sk-ant-api03-' + 'x'.repeat(40);
+  await p.locator('#clave').fill(CLAVE); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('la clave queda en el celular pero NO en tus datos ni en el respaldo', (await p.evaluate(() => localStorage.getItem('miPrime.claveIA'))) === CLAVE
+    && !(await p.evaluate(() => JSON.stringify(window.__prime.S))).includes('sk-ant'));
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="cfoto"]').click()]);
+  ok('"Sacar foto" abre la cámara (capture) y "Elegir foto" la galería', (await fc.element().getAttribute('capture')) === 'environment');
+  await fc.setFiles({ name: 'plato.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  await p.locator('#aclara').fill('la milanesa es de ternera');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
+  const q = pedidos.at(-1);
+  ok('manda la foto a Claude Opus 5.5 con el SDK oficial, desde el celular y con tu clave', q && q.body.model === 'claude-opus-5-5' && q.headers['x-api-key'] === CLAVE
+    && q.headers['anthropic-dangerous-direct-browser-access'] === 'true' && /x-stainless/i.test(Object.keys(q.headers).join(' ')));
+  ok('con fallback del servidor y respuesta con JSON schema fijo', q?.body.fallbacks === 'default' && /server-side-fallback-2026-07-01/.test(q.headers['anthropic-beta'])
+    && q.body.output_config?.format?.type === 'json_schema' && q.body.output_config.format.schema.required.includes('items'));
+  const img = q?.body.messages[0].content.find(b => b.type === 'image'), txt = q?.body.messages[0].content.find(b => b.type === 'text');
+  ok('la foto va como JPEG achicado, con tu aclaración y el prompt de nutricionista', img?.source.media_type === 'image/jpeg' && img.source.data.length > 50
+    && /ternera/.test(txt?.text) && /nutricionista/.test(q.body.system));
+  ok('muestra lo que vio Claude: 2 platos, 670 kcal, 40 g', await p.locator('.sheet .item input[data-k="kcal"]').count() === 2
+    && /670 kcal · 40 g/.test(await p.locator('#totalIA').innerText()) && /aceite/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet input[data-k="kcal"][data-i="1"]').fill('250');
+  ok('se pueden corregir los números antes de guardar', /700 kcal · 40 g/.test(await p.locator('#totalIA').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const hoy = await p.evaluate(d => window.__prime.S.comidas[d], HOY_FIJO);
+  ok('se guarda como una comida con su detalle: el día suma 1.300 kcal y 64 g', hoy.length === 2 && hoy[1].kcal === 700 && hoy[1].prot === 40
+    && hoy[1].origen === 'foto' && hoy[1].detalle.length === 2 && /1\.300/.test(await p.locator('.hero').innerText())
+    && /64 g de 130 g/.test(await p.locator('#view').innerText()));
+  // Errores claros
+  respuesta = { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } };
+  const [fc2] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="cgaleria"]').click()]);
+  ok('"Elegir foto" no fuerza la cámara', (await fc2.element().getAttribute('capture')) === null);
+  await fc2.setFiles({ name: 'plato.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1200);
+  ok('si la clave no sirve, lo dice y deja reintentar', /La clave de Anthropic no es válida/.test(await p.locator('body').innerText())
+    && (await p.locator('.sheet [data-x="o"]').innerText()) === 'Reintentar');
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('[data-act="cborrar"][data-i="0"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('borrar una comida pide confirmación y la saca', (await p.evaluate(d => window.__prime.S.comidas[d].length, HOY_FIJO)) === 1);
+  await p.locator('[data-act="cpeso"]').click(); await p.locator('#pPesoHoy').fill('72.8'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  const S2 = await p.evaluate(() => window.__prime.S);
+  ok('registrar el peso recalcula la meta', S2.perfil.peso === 72.8 && S2.pesos[HOY_FIJO] === 72.8 && /de 1\.870 kcal/.test(await p.locator('.hero').innerText()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{}, { comidas: { '2026-10-14': [{ nombre: 'x', kcal: -1, prot: 0 }] } }, { pesos: { hoy: 70 } }, { perfil: 'yo' }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae comidas, pesos y perfil, y rechaza los rotos (' + resp + ')', resp === 'ok,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 32. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

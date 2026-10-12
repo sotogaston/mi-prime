@@ -144,7 +144,41 @@ import. Qué datos lee y dónde quedan: [`privacidad.html`](privacidad.html).
 
 ---
 
-## Las cinco pantallas
+## Comida
+
+La pestaña **Comida** suma las calorías y proteínas del día contra una meta
+calculada con tu perfil (sexo, edad, altura, peso, peso meta, ritmo y
+actividad, en *Completar perfil*):
+
+- **Gasto diario**: Mifflin-St Jeor (base) × actividad (1,2 a 1,9; *moderada*
+  1,55 si no se cambia).
+- **Calorías meta**: gasto − déficit del ritmo elegido (0,5 kg por semana =
+  550 kcal menos por día, a 7.700 kcal por kilo), nunca debajo de 1.500 kcal
+  (hombre) o 1.200 (mujer).
+- **Proteína**: 1,8 g por kilo de peso actual.
+
+Con 73,2 kg, 164 cm, 39 años, hombre, moderado y 0,5 kg por semana da unas
+**1.880 kcal y 130 g de proteína**, y faltan unas 7 semanas para los 70 kg.
+*Registrar peso* recalcula todo.
+
+Lo que comés se carga de tres formas: **Sacar foto**, **Elegir foto** o
+**Agregar a mano**. La foto (achicada a 1024 px) va a **Claude Opus 5.5** con
+la API de Anthropic, que devuelve cada plato con su porción, calorías y
+proteína; antes de guardar se puede corregir cada número, y una aclaración
+("era media porción", "sin aceite") cambia la estimación. La foto no se guarda.
+Cada análisis cuesta unos 2 a 3 centavos de dólar en tu cuenta de Anthropic:
+la clave (*console.anthropic.com → API keys*) se carga en *Fotos con Claude*,
+queda solo en el teléfono y **no viaja en el respaldo**. Los últimos 7 días se
+ven en una tabla (verde: dentro de la meta o proteína alcanzada; amarillo: te
+pasaste de calorías).
+
+El SDK de Anthropic va empaquetado en `vendor/anthropic-sdk.js` (se regenera
+con `npm run vendor` a partir de `ia-entrada.mjs`) y se carga recién al
+analizar la primera foto.
+
+---
+
+## Las seis pantallas
 
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
@@ -156,6 +190,7 @@ import. Qué datos lee y dónde quedan: [`privacidad.html`](privacidad.html).
 - **Semanas** — la planilla semanal: un hábito por vez en bloques 1-7 / 8-14 /
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
+- **Comida** — calorías y proteínas del día contra la meta, por foto o a mano.
 - **Más** — hábitos (alta, edición, orden), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
 
@@ -173,9 +208,11 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                210 pruebas automatizadas (Playwright)
+├── test.mjs                238 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
+├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
+├── vendor/                 SDK de Anthropic empaquetado, para las fotos de Comida
 ├── gen-icons.mjs           regenera los íconos (web y Android)
 ├── PUBLICAR.md             cómo subirla a GitHub Pages
 ├── package.json
@@ -241,7 +278,9 @@ Para verla en local sobre http (con service worker): `npm run serve`.
 
 - **Sin dependencias también en runtime.** El service worker cachea seis archivos
   y nada más. No hay CDN que pueda caerse, y la web no tiene build: Capacitor
-  solo envuelve la misma `index.html` para Android.
+  solo envuelve la misma `index.html` para Android. La única excepción es el SDK
+  de Anthropic para las fotos de Comida, que va copiado en `vendor/` (no de un
+  CDN) y se carga solo al analizar una foto.
 
 ## Próximos pasos
 

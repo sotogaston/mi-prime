@@ -190,7 +190,7 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in srgb,var(--surface) 88%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom)}
-.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(6,1fr)}
 .navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--muted)}
 .navin button b{font-size:20px;line-height:1;font-weight:400}
 .navin button[aria-current=true]{color:var(--ink)}
@@ -223,6 +223,18 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
 .eje.fuerte{fill:var(--ink-2)}
 .pdet{font-size:13px;color:var(--ink-2);min-height:19px;margin:6px 0 0;text-align:center}
 .mnav button:disabled{opacity:.3}
+.comida{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.comida:last-child{border-bottom:none}
+.comida .hm{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;min-width:38px}
+.comida span.n{flex:1;min-width:0}
+.comida b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.comida .x{color:var(--muted);font-size:17px;width:32px;height:32px;border-radius:9px;display:grid;place-items:center}
+.sheet label.campo{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
+.sheet select{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:13px;padding:11px 12px;color:var(--ink);font:inherit;font-size:15px}
+.foto{width:100%;max-height:220px;object-fit:cover;border-radius:14px;display:block;margin-bottom:8px}
+.item{display:grid;grid-template-columns:1fr 78px 64px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.item input{padding:8px;font-size:14px;text-align:right}
+.item small{display:block;color:var(--muted);font-size:12px}
 details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 </style>
 </head>
@@ -244,6 +256,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
     <button data-tab="mes"    aria-current="false"><b>◍</b>Mes</button>
     <button data-tab="semana" aria-current="false"><b>◔</b>Semanas</button>
     <button data-tab="pasos"  aria-current="false"><b>▥</b>Pasos</button>
+    <button data-tab="comida" aria-current="false"><b>◫</b>Comida</button>
     <button data-tab="mas"    aria-current="false"><b>≡</b>Más</button>
   </div>
 </nav>
@@ -286,6 +299,7 @@ function migrate(s){
   s.autoClosed ||= {}; s.values ||= {};   // v2: quién escribió la marca y el valor real
   s.feriados ||= []; s.laborables ||= []; // feriados propios y feriados que se trabajan (ver esLibre)
   s.pasos ||= {};                          // pasos por día: Health Connect o el CSV de Samsung Health
+  s.comidas ||= {}; s.pesos ||= {};        // comidas por día y peso por día (pestaña Comida)
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
   return s;
@@ -820,6 +834,45 @@ function marcarPorPasos(S, hoy){
   return marcados.sort();
 }
 
+/* ---- comida: metas de calorías y proteína ----
+   S.perfil = { sexo: "h"|"m", edad, altura (cm), peso (kg), pesoMeta, ritmo (kg/semana), actividad }
+   Gasto base con Mifflin-St Jeor, por la actividad; para bajar se resta lo que
+   pide el ritmo (7.700 kcal por kilo), con un piso de seguridad. Proteína: 1,8 g
+   por kilo, para bajar grasa sin perder músculo. */
+const ACTIVIDAD = [[1.2, "Sedentaria"], [1.375, "Liviana (1 a 3 días de ejercicio)"],
+                   [1.55, "Moderada (3 a 5 días)"], [1.725, "Intensa (6 o 7 días)"]];
+function perfilCompleto(p){
+  return !!p && (p.sexo === "h" || p.sexo === "m") && [p.edad, p.altura, p.peso, p.pesoMeta, p.ritmo, p.actividad]
+    .every(x => Number.isFinite(x) && x > 0);
+}
+function metasNutricion(p){
+  if(!perfilCompleto(p)) return null;
+  const tmb = 10 * p.peso + 6.25 * p.altura - 5 * p.edad + (p.sexo === "h" ? 5 : -161);
+  const gasto = tmb * p.actividad;
+  const bajar = p.peso > p.pesoMeta;
+  const deficit = bajar ? p.ritmo * 7700 / 7 : 0;
+  const piso = p.sexo === "h" ? 1500 : 1200;
+  return {
+    tmb: Math.round(tmb), gasto: Math.round(gasto), deficit: Math.round(deficit),
+    kcal: Math.max(piso, Math.round((gasto - deficit) / 10) * 10),
+    prot: Math.round(1.8 * p.peso / 5) * 5,
+    faltan: Math.max(0, Math.round((p.peso - p.pesoMeta) * 10) / 10),
+    semanas: bajar ? Math.ceil((p.peso - p.pesoMeta) / p.ritmo) : 0
+  };
+}
+/* S.comidas = { "2026-10-12": [{ id, hora, nombre, kcal, prot, origen }] } */
+function totalComidas(lista){
+  return (lista || []).reduce((t, c) => ({ kcal: t.kcal + (c.kcal || 0), prot: t.prot + (c.prot || 0) }), { kcal: 0, prot: 0 });
+}
+/* Lo que devuelve Claude, a números confiables: nada negativo ni absurdo */
+function normalizarAnalisis(r){
+  const num = (x, max) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? Math.min(Math.round(n), max) : 0; };
+  const items = (Array.isArray(r?.items) ? r.items : []).filter(i => i && typeof i.nombre === "string" && i.nombre.trim())
+    .map(i => ({ nombre: i.nombre.trim().slice(0, 60), porcion: String(i.porcion || "").slice(0, 60),
+                 kcal: num(i.kcal, 5000), prot: num(i.proteina_g, 400) }));
+  return { items, nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
+}
+
 /* ---- horarios ----
    Cada hábito puede tener h.hora ("07:15") y h.hasta ("08:00"). */
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -1097,7 +1150,7 @@ function diaRelativo(ds){
 const view = document.getElementById("view");
 
 function render(){
-  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, mas:vMas })[TAB]();
+  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, mas:vMas })[TAB]();
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
   window.scrollTo(0,0);
@@ -1454,6 +1507,121 @@ function statsPasos(r){
   </div>`;
 }
 
+/* ---------- comida: calorías y proteína del día ---------- */
+function barra(valor, meta, color){
+  const pct = meta ? Math.min(100, Math.round(100 * valor / meta)) : 0;
+  return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${valor}"><i style="width:${pct}%;background:${color}"></i></div>`;
+}
+function vComida(){
+  const p = S.perfil, m = metasNutricion(p), hoy = S.comidas?.[TODAY] || [], t = totalComidas(hoy);
+  const conClave = !!claveIA();
+  const perfil = !m ? `<div class="card"><div class="card-t">Tu meta de calorías y proteína</div>
+      <p style="font-size:14px;margin:0;line-height:1.5">Completá tu perfil (peso, altura, edad, a dónde querés llegar) y la app calcula cuánto comer por día.</p>
+      <button class="btn" data-act="cperfil">Completar perfil</button></div>` : "";
+  const resumen = m ? (() => {
+    const quedan = m.kcal - t.kcal;
+    return `<div class="card">${heroInner(fmt(t.kcal), quedan >= 0 ? `de ${fmt(m.kcal)} kcal · quedan ${fmt(quedan)}` : `de ${fmt(m.kcal)} kcal · te pasaste ${fmt(-quedan)}`)}
+      ${barra(t.kcal, m.kcal, quedan >= 0 ? "var(--ok)" : "var(--fail)")}
+      <p style="margin:14px 0 0;font-size:14.5px"><b>${fmt(t.prot)} g</b> de ${fmt(m.prot)} g de proteína${t.prot >= m.prot ? " ✓" : ` · faltan ${fmt(m.prot - t.prot)} g`}</p>
+      ${barra(t.prot, m.prot, t.prot >= m.prot ? "var(--ok)" : "var(--muted)")}</div>`;
+  })() : "";
+  const acciones = `<div class="card"><div class="card-t">Cargar lo que comés</div>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <button class="btn" data-act="cfoto" style="margin:0">Sacar foto</button>
+      <button class="btn ghost" data-act="cgaleria" style="margin:0">Elegir foto</button></div>
+    <button class="btn ghost" data-act="cmano">Agregar a mano</button>
+    ${conClave ? "" : `<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">Para que Claude lea las fotos falta cargar tu clave de Anthropic (abajo, en “Fotos con Claude”).</p>`}</div>`;
+  const lista = `<div class="card"><div class="card-t">Hoy</div>${hoy.length ? hoy.map((c, i) => `<div class="comida">
+      <span class="hm">${esc(c.hora || "")}</span><span class="n">${esc(c.nombre)}</span>
+      <b>${fmt(c.kcal)} kcal</b><span style="color:var(--muted);font-size:13px;white-space:nowrap">${fmt(c.prot)} g</span>
+      <button class="x" data-act="cborrar" data-i="${i}" aria-label="Borrar ${esc(c.nombre)}">✕</button></div>`).join("")
+    : `<p style="margin:0;color:var(--muted);font-size:13.5px">Todavía no cargaste nada hoy.</p>`}</div>`;
+  const dias = Array.from({ length: 7 }, (_, i) => iso(addDays(parseISO(TODAY), -i)));
+  const semana = m ? `<div class="card"><div class="card-t">Últimos 7 días</div><table class="tbl">
+      <tr><th>Día</th><th>Calorías</th><th>Proteína</th></tr>
+      ${dias.map(d => { const x = totalComidas(S.comidas?.[d]); const vacio = !(S.comidas?.[d] || []).length;
+        return `<tr${d === TODAY ? ' class="tr-today"' : ""}><td>${cap(fechaCorta(d))}</td>
+          <td class="${vacio ? "n" : x.kcal <= m.kcal ? "g" : "y"}">${vacio ? "—" : fmt(x.kcal)}</td>
+          <td class="${vacio ? "n" : x.prot >= m.prot ? "g" : ""}">${vacio ? "—" : fmt(x.prot) + " g"}</td></tr>`; }).join("")}
+      </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Verde: calorías dentro de la meta o proteína alcanzada. Amarillo: te pasaste de calorías.</p></div>` : "";
+  const cuerpo = m ? `<div class="card"><div class="card-t">Tu meta</div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55"><b>${fmt1(p.peso)} kg</b> → ${fmt1(p.pesoMeta)} kg
+        ${m.faltan ? `· faltan ${fmt1(m.faltan)} kg (≈ ${m.semanas} ${m.semanas === 1 ? "semana" : "semanas"} a ${fmt1(p.ritmo)} kg por semana)` : "· ¡llegaste! La meta es mantener"}</p>
+      <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.5">Gastás unas ${fmt(m.gasto)} kcal por día (base ${fmt(m.tmb)}, Mifflin-St Jeor por tu actividad)${m.deficit ? `; para bajar ${fmt1(p.ritmo)} kg por semana comés ${fmt(m.deficit)} menos` : ""}. Proteína: 1,8 g por kilo. Son estimaciones: si en 2 o 3 semanas el peso no se mueve, bajá un poco la meta.</p>
+      <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
+        <button class="btn ghost" data-act="cpeso" style="margin:0">Registrar peso</button>
+        <button class="btn ghost" data-act="cperfil" style="margin:0">Editar perfil</button></div></div>` : "";
+  const ia = `<div class="card"><div class="card-t">Fotos con Claude</div>
+    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto se manda a Claude Opus 5.5 (Anthropic), que estima calorías y proteína; no se guarda en la app.
+      Cuesta unos 2 a 3 centavos de dólar por foto y se cobra en tu cuenta de Anthropic.</p>
+    <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (console.anthropic.com → API keys)."}</p>
+    <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>`;
+  return perfil + resumen + acciones + lista + semana + cuerpo + ia;
+}
+function fmt1(n){ return Number(n).toLocaleString("es-AR", { maximumFractionDigits: 1 }); }
+function horaAhora(){ const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+function guardarComida(c){
+  (S.comidas ||= {})[TODAY] ||= [];
+  S.comidas[TODAY].push({ id: uid(), hora: horaAhora(), ...c });
+  save(); render();
+  toast(`${c.nombre}: ${fmt(c.kcal)} kcal · ${fmt(c.prot)} g de proteína`);
+}
+
+function editarPerfil(){
+  const p = S.perfil || {};
+  const op = (lista, v) => lista.map(([x, t]) => `<option value="${x}"${x === v ? " selected" : ""}>${esc(t)}</option>`).join("");
+  sheet(`<h3>Tu perfil</h3><p class="sub">Con esto se calcula la meta del día. Queda solo en este celular (y en tu respaldo).</p>
+    <label class="campo">Fórmula</label><select id="pSexo">${op([["h", "Hombre"], ["m", "Mujer"]], p.sexo)}</select>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo">Edad</label><input type="number" id="pEdad" inputmode="numeric" min="14" max="100" value="${p.edad ?? ""}"></div>
+      <div><label class="campo">Altura (cm)</label><input type="number" id="pAltura" inputmode="numeric" min="120" max="230" value="${p.altura ?? ""}"></div>
+      <div><label class="campo">Peso hoy (kg)</label><input type="number" id="pPeso" inputmode="decimal" step="0.1" min="30" max="300" value="${p.peso ?? ""}"></div>
+      <div><label class="campo">Peso meta (kg)</label><input type="number" id="pMeta" inputmode="decimal" step="0.1" min="30" max="300" value="${p.pesoMeta ?? ""}"></div></div>
+    <label class="campo">Ritmo</label><select id="pRitmo">${op([[0.25, "0,25 kg por semana (suave)"], [0.5, "0,5 kg por semana"], [0.75, "0,75 kg por semana (exigente)"]], p.ritmo ?? 0.5)}</select>
+    <label class="campo">Actividad</label><select id="pAct">${op(ACTIVIDAD, p.actividad ?? 1.55)}</select>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const v = id => Number(String(modal.querySelector(id).value).replace(",", "."));
+    const nuevo = { sexo: modal.querySelector("#pSexo").value, edad: v("#pEdad"), altura: v("#pAltura"), peso: v("#pPeso"),
+                    pesoMeta: v("#pMeta"), ritmo: v("#pRitmo"), actividad: v("#pAct") };
+    if(!perfilCompleto(nuevo) || nuevo.edad < 14 || nuevo.altura < 120 || nuevo.peso < 30){ toast("Revisá los datos: falta alguno o hay uno raro"); return; }
+    if(nuevo.peso !== S.perfil?.peso) (S.pesos ||= {})[TODAY] = nuevo.peso;
+    S.perfil = nuevo; save(); closeSheet(); render();
+    const m = metasNutricion(nuevo);
+    toast(`Meta: ${fmt(m.kcal)} kcal y ${fmt(m.prot)} g de proteína por día`);
+  };
+}
+function registrarPeso(){
+  sheet(`<h3>Peso de hoy</h3><p class="sub">Recalcula la meta con tu peso nuevo.</p>
+    <input type="number" id="pPesoHoy" inputmode="decimal" step="0.1" min="30" max="300" value="${S.perfil.peso}">
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const inp = modal.querySelector("#pPesoHoy"); inp.focus(); inp.select();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const n = Math.round(Number(String(inp.value).replace(",", ".")) * 10) / 10;
+    if(!(n >= 30 && n <= 300)){ toast("Poné un peso entre 30 y 300 kg"); return; }
+    S.perfil.peso = n; (S.pesos ||= {})[TODAY] = n; save(); closeSheet(); render();
+    toast(`Peso ${fmt1(n)} kg · meta ${fmt(metasNutricion(S.perfil).kcal)} kcal`);
+  };
+}
+function comidaAMano(){
+  sheet(`<h3>Agregar a mano</h3>
+    <label class="campo">Qué comiste</label><input type="text" id="cNombre" maxlength="60" placeholder="Ej.: 2 empanadas de carne">
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo">Calorías (kcal)</label><input type="number" id="cKcal" inputmode="numeric" min="0" max="5000"></div>
+      <div><label class="campo">Proteína (g)</label><input type="number" id="cProt" inputmode="numeric" min="0" max="400"></div></div>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
+  modal.querySelector("#cNombre").focus();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const nombre = modal.querySelector("#cNombre").value.trim(), kcal = Math.round(Number(modal.querySelector("#cKcal").value)),
+          prot = Math.round(Number(modal.querySelector("#cProt").value) || 0);
+    if(!nombre || !(kcal >= 0 && kcal <= 5000) || !(prot >= 0 && prot <= 400)){ toast("Poné qué comiste y las calorías"); return; }
+    closeSheet(); guardarComida({ nombre, kcal, prot, origen: "mano" });
+  };
+}
+
 /* ---------- MÁS ---------- */
 function vMas(){
   const {y,m} = cursor, dim = daysInMonth(y,m), hs = habitsSorted();
@@ -1629,6 +1797,21 @@ function onAct(e){
     case "hcInstalar": nativo("HealthPlugin", "showHealthConnectInPlayStore").catch(() => {}); break;
     case "hcAbrir": nativo("HealthPlugin", "openHealthConnectSettings").catch(() => toast("No se pudo abrir Health Connect")); break;
     case "pmeta": editarMetaPasos(); break;
+    case "cperfil": editarPerfil(); break;
+    case "cpeso": registrarPeso(); break;
+    case "cmano": comidaAMano(); break;
+    case "cfoto": elegirFoto(true); break;
+    case "cgaleria": elegirFoto(false); break;
+    case "cclave": editarClave(); break;
+    case "cborrar": {
+      const c = S.comidas?.[TODAY]?.[+el.dataset.i];
+      if(c) confirmSheet("¿Borrar esta comida?", `${c.nombre} · ${fmt(c.kcal)} kcal`, "Borrar", () => {
+        S.comidas[TODAY].splice(+el.dataset.i, 1);
+        if(!S.comidas[TODAY].length) delete S.comidas[TODAY];
+        save(); render();
+      });
+      break;
+    }
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -1805,6 +1988,13 @@ function prepararRespaldo(texto){
     if(data[k] != null && !ok(data[k])) throw new Error(`El campo "${k}" está roto.`);
   if(data.pasos && !Object.entries(data.pasos).every(([d, n]) => esFecha(d) && Number.isInteger(n) && n >= 0))
     throw new Error(`El campo "pasos" está roto.`);
+  const esNum = x => typeof x === "number" && Number.isFinite(x) && x >= 0;
+  if(data.pesos != null && !(esObj(data.pesos) && Object.entries(data.pesos).every(([d, n]) => esFecha(d) && esNum(n))))
+    throw new Error(`El campo "pesos" está roto.`);
+  if(data.comidas != null && !(esObj(data.comidas) && Object.entries(data.comidas).every(([d, l]) => esFecha(d) && Array.isArray(l)
+      && l.every(c => esObj(c) && typeof c.nombre === "string" && esNum(c.kcal) && esNum(c.prot)))))
+    throw new Error(`El campo "comidas" está roto.`);
+  if(data.perfil != null && !esObj(data.perfil)) throw new Error(`El campo "perfil" está roto.`);
   if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
     throw new Error(`El campo "autoClosed" está roto.`);
   if(data.settings?.lastClosed != null && !esFecha(data.settings.lastClosed))
@@ -2084,9 +2274,168 @@ if(NATIVO) setInterval(() => { if(!document.hidden && TAB === "pasos") sincroniz
 function caminando(){ return S.habits.find(h => h.auto?.source === "steps")?.name || "Caminar"; }
 sincronizarPasos();
 
+/* =========================================================================
+   9. COMIDA CON CLAUDE: foto → calorías y proteína
+   -------------------------------------------------------------------------
+   La foto (achicada a 1024 px) va a Claude Opus 5.5 por el SDK oficial de
+   Anthropic, empaquetado en vendor/anthropic-sdk.js (npm run vendor) y cargado
+   recién la primera vez que se analiza una foto. La respuesta viene con un JSON
+   schema fijo; si Claude no puede, el fallback del servidor reintenta con otro
+   modelo. La clave es de la persona, vive solo en este celular y NO va en el
+   respaldo (por eso no está en S).
+   ========================================================================= */
+const CLAVE_IA = "miPrime.claveIA", MODELO_COMIDA = "claude-opus-5-5";
+const PROMPT_COMIDA = `Sos nutricionista y estimás calorías y proteínas de comidas a partir de una foto, para alguien en Argentina que quiere bajar de peso sin perder músculo.
+- Identificá cada alimento o bebida que se ve. Estimá la porción con las referencias de la foto (plato, cubiertos, manos, envases) y escribila en gramos o en medidas caseras.
+- Calculá las kcal y los gramos de proteína de esa porción con valores de tablas nutricionales estándar. Sumá lo que no se ve pero suele llevar (aceite de cocción, manteca, aderezos) como estimación razonable y aclaralo en la nota.
+- Si la persona escribe una aclaración, manda sobre lo que parece la foto.
+- Si en la foto no hay comida, devolvé items vacíos y explicalo en la nota.
+- confianza: "alta" si se ve claro qué es y cuánto; "baja" si la porción o los ingredientes son dudosos.
+- Nombres cortos en castellano rioplatense (por ejemplo "Milanesa de carne", "Puré de papas").`;
+const ESQUEMA_COMIDA = {
+  type: "object",
+  properties: {
+    items: { type: "array", items: { type: "object", properties: {
+      nombre: { type: "string" }, porcion: { type: "string" }, kcal: { type: "number" }, proteina_g: { type: "number" } },
+      required: ["nombre", "porcion", "kcal", "proteina_g"], additionalProperties: false } },
+    nota: { type: "string" },
+    confianza: { type: "string", enum: ["alta", "media", "baja"] }
+  },
+  required: ["items", "nota", "confianza"], additionalProperties: false
+};
+function claveIA(){ try{ return localStorage.getItem(CLAVE_IA) || ""; }catch(e){ return ""; } }
+function editarClave(){
+  sheet(`<h3>Tu clave de Anthropic</h3>
+    <p class="sub">Creala en console.anthropic.com → API keys (empieza con sk-ant-). Se guarda solo en este celular y no viaja en el respaldo.</p>
+    <input type="password" id="clave" autocomplete="off" placeholder="sk-ant-…" value="">
+    <div class="row2">${claveIA() ? `<button class="btn ghost danger" data-x="b">Borrar clave</button>` : `<button class="btn ghost" data-x="c">Cancelar</button>`}
+      <button class="btn" data-x="o">Guardar</button></div>`);
+  const inp = modal.querySelector("#clave"); inp.focus();
+  modal.querySelector('[data-x="c"]')?.addEventListener("click", closeSheet);
+  modal.querySelector('[data-x="b"]')?.addEventListener("click", () => {
+    try{ localStorage.removeItem(CLAVE_IA); }catch(e){}
+    closeSheet(); render(); toast("Clave borrada");
+  });
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const k = inp.value.trim();
+    if(!/^sk-ant-[\w-]{20,}$/.test(k)){ toast("Esa no parece una clave de Anthropic (empieza con sk-ant-)"); return; }
+    try{ localStorage.setItem(CLAVE_IA, k); }catch(e){ toast("No se pudo guardar la clave"); return; }
+    closeSheet(); render(); toast("Clave guardada");
+  };
+}
+
+/* Cámara (capture) o galería. En la app de Android, Capacitor abre la cámara del celular. */
+function elegirFoto(camara){
+  if(!claveIA()){ editarClave(); return; }
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*";
+  if(camara) inp.setAttribute("capture", "environment");
+  inp.onchange = async () => {
+    const f = inp.files[0]; if(!f) return;
+    try{ prepararFoto(await achicarFoto(f)); }
+    catch(e){ toast("No se pudo abrir la foto"); }
+  };
+  inp.click();
+}
+/* A 1024 px de lado y JPEG: menos tokens, menos costo, sube rápido */
+async function achicarFoto(archivo){
+  const img = await createImageBitmap(archivo);
+  const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  const dataUrl = c.toDataURL("image/jpeg", 0.8);
+  return { dataUrl, base64: dataUrl.split(",")[1] };
+}
+function prepararFoto(foto){
+  sheet(`<h3>¿Qué comés?</h3><img class="foto" src="${foto.dataUrl}" alt="Tu comida">
+    <label class="campo">Aclaración (opcional)</label>
+    <input type="text" id="aclara" maxlength="120" placeholder="Ej.: son 2 empanadas, la gaseosa es light">
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Analizar</button></div>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = async e => {
+    const boton = e.currentTarget, aclaracion = modal.querySelector("#aclara").value.trim();
+    boton.disabled = true; boton.textContent = "Analizando…";
+    try{ mostrarAnalisis(await analizarFoto(foto.base64, aclaracion)); }
+    catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
+  };
+}
+let sdkIA = null;
+function cargarSDK(){
+  return sdkIA ||= new Promise((ok, mal) => {
+    if(window.AnthropicSDK) return ok(window.AnthropicSDK);
+    const s = document.createElement("script");
+    s.src = "vendor/anthropic-sdk.js";
+    s.onload = () => ok(window.AnthropicSDK);
+    s.onerror = () => { sdkIA = null; mal(new Error("sin-sdk")); };
+    document.head.appendChild(s);
+  });
+}
+async function analizarFoto(base64, aclaracion){
+  const { Anthropic, betaJSONSchemaOutputFormat } = await cargarSDK();
+  const client = new Anthropic({ apiKey: claveIA(), dangerouslyAllowBrowser: true, timeout: 120000, maxRetries: 1 });
+  const msg = await client.beta.messages.parse({
+    model: MODELO_COMIDA,
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: PROMPT_COMIDA,
+    output_config: { format: betaJSONSchemaOutputFormat(ESQUEMA_COMIDA) },
+    messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+      { type: "text", text: aclaracion ? `Aclaración: ${aclaracion}` : "Estimá las calorías y proteínas de esta comida." }] }]
+  });
+  if(msg.stop_reason === "refusal") throw new Error("rechazo");
+  if(!msg.parsed_output) throw new Error("sin-respuesta");
+  return normalizarAnalisis(msg.parsed_output);
+}
+function mensajeErrorIA(e){
+  const A = window.AnthropicSDK?.Anthropic;
+  if(e?.message === "sin-sdk") return "No se pudo cargar Claude: revisá la conexión";
+  if(e?.message === "rechazo") return "Claude no pudo analizar esta foto";
+  if(e?.message === "sin-respuesta") return "Claude respondió algo que no se pudo leer: probá de nuevo";
+  if(A){
+    if(e instanceof A.AuthenticationError) return "La clave de Anthropic no es válida";
+    if(e instanceof A.PermissionDeniedError) return "La clave no tiene permiso para usar Claude";
+    if(e instanceof A.RateLimitError) return "Llegaste al límite de uso: probá en un minuto";
+    if(e instanceof A.APIConnectionError) return "Sin conexión con Claude";
+    if(e instanceof A.BadRequestError) return /credit/i.test(e.message) ? "Tu cuenta de Anthropic no tiene saldo" : "Claude no aceptó el pedido: " + e.message;
+    if(e instanceof A.APIError) return `Claude no respondió (${e.status ?? "error"}): probá en un rato`;
+  }
+  return "No se pudo analizar la foto";
+}
+function mostrarAnalisis(r){
+  const filas = r.items.map((it, i) => `<div class="item"><span>${esc(it.nombre)}<small>${esc(it.porcion)}</small></span>
+      <input type="number" data-k="kcal" data-i="${i}" inputmode="numeric" min="0" value="${it.kcal}" aria-label="Calorías de ${esc(it.nombre)}">
+      <input type="number" data-k="prot" data-i="${i}" inputmode="numeric" min="0" value="${it.prot}" aria-label="Proteína de ${esc(it.nombre)}"></div>`).join("");
+  sheet(`<h3>Lo que ve Claude</h3>
+    <p class="sub">Confianza ${esc(r.confianza)}. Corregí los números si hace falta.</p>
+    ${r.items.length ? `<div class="item" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em"><span>Comida</span><span style="text-align:right">kcal</span><span style="text-align:right">prot g</span></div>${filas}` : ""}
+    ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
+    <p id="totalIA" style="font-size:15px;margin:12px 0 0"></p>
+    <div class="row2"><button class="btn ghost" data-x="c">Descartar</button>${r.items.length ? `<button class="btn" data-x="o">Guardar</button>` : ""}</div>`);
+  const total = () => {
+    r.items.forEach((it, i) => { for(const k of ["kcal", "prot"]){
+      const n = Math.round(Number(modal.querySelector(`input[data-k="${k}"][data-i="${i}"]`).value)); it[k] = n >= 0 ? n : 0; } });
+    const t = totalComidas(r.items);
+    modal.querySelector("#totalIA").innerHTML = `Total: <b>${fmt(t.kcal)} kcal</b> · <b>${fmt(t.prot)} g</b> de proteína`;
+    return t;
+  };
+  modal.querySelectorAll(".item input").forEach(i => i.addEventListener("input", total));
+  total();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]')?.addEventListener("click", () => {
+    const t = total();
+    closeSheet();
+    guardarComida({ nombre: r.items.map(i => i.nombre).join(", ").slice(0, 80), kcal: t.kcal, prot: t.prot, origen: "foto",
+                    detalle: r.items.map(({ nombre, porcion, kcal, prot }) => ({ nombre, porcion, kcal, prot })) });
+  });
+}
+
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
+  /* comida */ metasNutricion, totalComidas, normalizarAnalisis, claveIA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
 </body>
