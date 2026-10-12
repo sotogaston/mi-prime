@@ -1048,7 +1048,34 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   await c.close();
 }
 
-console.log('\n== 32. Capturas ==');
+console.log('\n== 32. Reflexión de hoy ==');
+{
+  const marks = { '2026-09-03': { hA: 'green', hB: 'yellow' }, '2026-10-13': { hA: 'green', hB: 'green' } };
+  const L = cargarLogica(estado({ marks }));
+  const semana = ['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19'].map(d => L.fraseDelDia(d).t);
+  ok('una frase por día, sin repetir en 6 días seguidos', L.REFLEXIONES.length === 6 && new Set(semana).size === 6
+    && L.fraseDelDia('2026-10-14') === L.fraseDelDia('2026-10-14') && L.fraseDelDia('2026-10-20') === L.fraseDelDia('2026-10-14'));
+  ok('están la de la disciplina, la de quedarse quieto y la de Aristóteles', L.REFLEXIONES.some(f => /cada año termina igual/.test(f.t))
+    && L.REFLEXIONES.some(f => /quedarte en el mismo lugar duele más que avanzar/.test(f.t))
+    && L.REFLEXIONES.some(f => /La calidad no es un acto, es un hábito/.test(f.t) && /Aristóteles/.test(f.de)));
+  ok('lo que se está cocinando: cuenta los verdes y desde cuándo', JSON.stringify(L.loQueSeCocina(estado({ marks }))) === '{"verdes":3,"desde":"2026-09-03"}'
+    && L.loQueSeCocina(estado()).verdes === 0);
+
+  const { p, c: ctx, errs } = await abrirEn(HOY_FIJO, estado({ marks }));
+  const frase = await p.evaluate(d => window.__prime.fraseDelDia(d).t, HOY_FIJO);
+  ok('Hoy muestra la reflexión del día', /Reflexión de hoy/.test(await p.locator('.reflex').textContent())
+    && (await p.locator('.reflex .frase').innerText()) === frase);
+  await p.locator('.reflex').click(); await p.waitForTimeout(100);
+  ok('tocándola se ven todas, con la de hoy marcada', await p.locator('.sheet blockquote').count() === 6
+    && (await p.locator('.sheet blockquote.hoy').innerText()).startsWith(frase));
+  ok('y lo acumulado: 3 veces en verde desde el 3 de septiembre', /3 veces en verde desde el 3 de septiembre/.test(await p.locator('.sheet .cocina').innerText()));
+  await p.locator('.sheet [data-x="c"]').click(); await p.waitForTimeout(100);
+  ok('"Seguir" la cierra', await p.locator('.sheet').count() === 0);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await ctx.close();
+}
+
+console.log('\n== 33. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

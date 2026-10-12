@@ -187,7 +187,10 @@ analizar la primera foto.
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
   amarillo y hoy no puede fallar (nunca en fin de semana ni feriado). Lo que
-  quedó sin marcar el último día hábil, para confirmarlo. Nota del día.
+  quedó sin marcar el último día hábil, para confirmarlo. **Reflexión de hoy**:
+  una frase por día, en rueda (la maldición de la disciplina, quedarse quieto
+  duele más que avanzar, "la calidad no es un acto, es un hábito"…); tocándola
+  se ven todas y cuántas veces marcaste verde desde que empezaste. Nota del día.
 - **Mes** — la rueda de 31 días: un anillo por hábito del centro hacia afuera, un
   sector por día, el día de hoy con contorno, Prime % en el centro. Las celdas se
   tocan para cambiarlas.
@@ -212,7 +215,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                245 pruebas automatizadas (Playwright)
+├── test.mjs                253 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
