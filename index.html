@@ -113,6 +113,14 @@ header{padding:calc(14px + env(safe-area-inset-top)) 0 8px}
 .pq{width:36px;height:36px;min-width:36px;border-radius:11px;display:grid;place-items:center;font-weight:700;font-size:16px;border:1px solid var(--line);background:var(--surface-2)}
 .pq.ok{color:var(--ok)} .pq.no{color:var(--fail)}
 .linkbtn{font-size:13px;color:var(--ink-2);text-decoration:underline;padding:6px 0 0}
+.reflex{display:block;width:100%;text-align:left}
+.reflex .frase{margin:0;font-size:15.5px;font-weight:600;line-height:1.45;letter-spacing:-.01em}
+.reflex small{display:block;color:var(--muted);font-size:12.5px;margin-top:5px}
+.reflex .ver{display:inline-block;font-size:12.5px;color:var(--ink-2);text-decoration:underline;margin-top:8px}
+.sheet blockquote{margin:0 0 9px;padding:9px 12px;border-left:3px solid var(--line);font-size:14.5px;line-height:1.45}
+.sheet blockquote.hoy{border-left-color:var(--ok)}
+.sheet blockquote small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.cocina{background:var(--ok-soft);border:1px solid var(--ok);border-radius:14px;padding:10px 12px;font-size:14px;line-height:1.45;margin:10px 0 12px}
 .more{width:38px;height:38px;min-width:38px;border-radius:12px;display:grid;place-items:center;color:var(--muted);font-size:19px;border:1px solid transparent}
 .more:active{background:var(--surface-2);border-color:var(--line)}
 
@@ -1006,6 +1014,27 @@ function generarICS(habits, desde, url, feriados, ahora, tz){
   L.push("END:VCALENDAR");
   return L.map(doblar).join("\r\n") + "\r\n";
 }
+
+/* ---- reflexión del día: una frase por día, en rueda ---- */
+const REFLEXIONES = [
+  { t: "La maldición de la disciplina es que cada día parece igual. La de la indisciplina, que cada año termina igual.", de: "@serudda" },
+  { t: "De un día para el otro nada parece cambiar. Pero bajo la rutina algo se está cocinando, aunque todavía no lo veas.", de: "@serudda" },
+  { t: "Llega un momento en que quedarte en el mismo lugar duele más que avanzar.", de: "" },
+  { t: "Somos lo que hacemos todos los días. La calidad no es un acto, es un hábito.", de: "Aristóteles, en palabras de Will Durant" },
+  { t: "“Estás joven, disfrutá”, “después lo hacés”: la tentación siempre suena razonable. Hoy también se le dice que no.", de: "@serudda" },
+  { t: "Memento mori: el tiempo se termina. No lo gastes esperando tener ganas.", de: "" }
+];
+function fraseDelDia(fecha){
+  const n = Math.round(parseISO(fecha).getTime() / 864e5), k = REFLEXIONES.length;
+  return REFLEXIONES[((n % k) + k) % k];
+}
+/* Lo que se está cocinando: todas las marcas en verde y desde cuándo */
+function loQueSeCocina(S){
+  let verdes = 0, desde = null;
+  for(const [d, m] of Object.entries(S.marks || {}))
+    for(const st of Object.values(m)) if(st === ST.GREEN){ verdes++; if(!desde || d < desde) desde = d; }
+  return { verdes, desde };
+}
 /* @logica:fin */
 
 /* =========================================================================
@@ -1246,6 +1275,7 @@ function vHoy(){
   ${alert}
   ${pendHTML}
   ${avisosHTML()}
+  ${reflexionHTML()}
   <div class="stats">
     <div class="stat"><b style="color:var(--ok)">${r.victorias}</b><span>Victorias</span></div>
     <div class="stat"><b style="color:var(--fail)">${r.reglasRotas}</b><span>Reglas rotas</span></div>
@@ -1264,6 +1294,25 @@ function vHoy(){
     <div class="card-t">Nota del día</div>
     <textarea id="note" rows="3" placeholder="¿Qué pasó hoy? ¿Qué te frenó?">${esc(S.notes[TODAY] || "")}</textarea>
   </div>`;
+}
+
+/* Reflexión de hoy: una frase por día; tocándola se ven todas y lo acumulado */
+function reflexionHTML(){
+  const f = fraseDelDia(TODAY);
+  return `<button class="card reflex" data-act="reflexion">
+    <div class="card-t">Reflexión de hoy</div>
+    <p class="frase">${esc(f.t)}</p>${f.de ? `<small>— ${esc(f.de)}</small>` : ""}
+    <span class="ver">Ver todas</span></button>`;
+}
+function verReflexion(){
+  const c = loQueSeCocina(S), hoy = fraseDelDia(TODAY), d = c.desde && parseISO(c.desde);
+  const desde = d ? `${d.getDate()} de ${MESES[d.getMonth()]}${d.getFullYear() !== parseISO(TODAY).getFullYear() ? " de " + d.getFullYear() : ""}` : "";
+  sheet(`<h3>Reflexión</h3>
+    ${c.verdes ? `<div class="cocina">Lo que se está cocinando: <b>${fmt(c.verdes)} ${c.verdes === 1 ? "vez" : "veces"} en verde</b> desde el ${desde}.
+      De un día para el otro no se nota; sumado, sí.</div>` : `<p class="sub">Cada verde suma, aunque hoy no se note.</p>`}
+    ${REFLEXIONES.map(f => `<blockquote${f === hoy ? ' class="hoy"' : ""}>${esc(f.t)}${f.de ? `<small>— ${esc(f.de)}</small>` : ""}</blockquote>`).join("")}
+    <button class="btn" data-x="c">Seguir</button>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
 }
 
 /* ---------- MES ---------- */
@@ -1790,6 +1839,7 @@ function onAct(e){
       }); break;
     case "editH": editHabit(hid); break;
     case "pend": applyMark(el.dataset.d, hid, el.dataset.st); break;
+    case "reflexion": verReflexion(); break;
     case "feriado": {
       /* Alterna hoy entre libre y hábil: saca o agrega en la lista que corresponda */
       const quitar = (arr, ds) => { const i = arr.indexOf(ds); if(i >= 0) arr.splice(i, 1); return i >= 0; };
@@ -2455,6 +2505,7 @@ function mostrarAnalisis(r, { origen = "foto", nombre } = {}){
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
   /* comida */ metasNutricion, totalComidas, normalizarAnalisis, claveIA,
+  /* reflexión */ fraseDelDia, loQueSeCocina, REFLEXIONES,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
 </body>
