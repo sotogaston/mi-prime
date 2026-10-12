@@ -303,9 +303,9 @@ console.log('\n== 14. Día hábil sin abrir = sin dato ==');
   const plan = await p.evaluate(() => {
     const P = window.__prime, S = P.S;
     S.habits.push({ id: 'hP', name: 'Caminar seguido', order: 3, auto: { source: 'steps', threshold: 6000, near: 0.9 } });
-    (S.marks['2026-10-12'] ||= {}).hP = 'yellow';
-    P.markAutoClosed(S, '2026-10-12', 'hP');
-    return P.planStepImport(S, { '2026-10-12': 2000 }, '2026-10-14').map(x => x.action + ':' + x.to);
+    (S.marks['2026-10-13'] ||= {}).hP = 'yellow';
+    P.markAutoClosed(S, '2026-10-13', 'hP');
+    return P.planStepImport(S, { '2026-10-13': 2000 }, '2026-10-14').map(x => x.action + ':' + x.to);
   });
   ok('el import de pasos puede convertir un sin dato en amarillo real (' + plan.join() + ')', plan.join() === 'proponer:yellow');
   ok('sin errores de consola: ' + JSON.stringify(errs), errs.length === 0);
@@ -656,9 +656,9 @@ console.log('\n== 27. Pasos: totales y promedios ==');
   const L = cargarLogica(S);
   ok('la meta de pasos es 8000 si no se cambió, y la de Ajustes si se cambió', L.metaPasos(S) === 8000 && L.metaPasos({ habits: [], settings: { metaPasos: 10000 } }) === 10000);
   const plan = metaPasos => { const T = { habits: [CAMINAR], marks: {}, settings: { metaPasos }, createdAt: '2026-09-01' };
-    return cargarLogica(T).planStepImport(T, { '2026-10-12': 7500, '2026-10-13': 9000 }, '2026-10-14').map(x => x.to + (x.ask ? '?' : '')).join(); };
-  ok('"Caminar seguido" se marca con la misma meta: con 8000, 7.500 queda verde a confirmar y 9.000 verde (' + plan(8000) + ')', plan(8000) === 'green?,green');
-  ok('y con 10000, 7.500 queda amarillo y 9.000 (90 %) verde a confirmar (' + plan(10000) + ')', plan(10000) === 'yellow,green?');
+    return cargarLogica(T).planStepImport(T, { '2026-10-09': 9000, '2026-10-12': 9000, '2026-10-13': 7500 }, '2026-10-14').map(x => x.to + (x.ask ? '?' : '')).join(); };
+  ok('"Caminar seguido" se marca con la misma meta: con 8000, 9.000 verde y 7.500 verde a confirmar; el 12/10 es feriado y no se mide (' + plan(8000) + ')', plan(8000) === 'green,green?');
+  ok('y con 10000, 9.000 (90 %) verde a confirmar y 7.500 amarillo (' + plan(10000) + ')', plan(10000) === 'green?,yellow');
   const reg = L.pasosDeRegistros([
     { startDate: new Date(2026, 9, 12, 9).toISOString(), value: 3000, sourceBundleId: 'com.sec.android.app.shealth' },
     { startDate: new Date(2026, 9, 12, 23, 30).toISOString(), value: 1000, sourceBundleId: 'com.sec.android.app.shealth' },
@@ -688,6 +688,29 @@ console.log('\n== 27. Pasos: totales y promedios ==');
   const solo = L.resumenPasos({ '2026-10-14': 2500 }, '2026-10-12', '2026-10-18', 6000, '2026-10-14');
   ok('si hoy es el único día con dato, el promedio es hoy', solo.promedio === 2500);
   ok('un día sin registro no cuenta como 0 en el promedio', L.resumenPasos({ '2026-10-12': 8000 }, '2026-10-12', '2026-10-13', 6000, '2026-10-14').promedio === 8000);
+  const libre = L.esLibre;
+  const semL = L.resumenPasos(PASOS, '2026-10-05', '2026-10-11', 6000, '2026-10-14', libre);
+  ok(`la meta solo cuenta de lunes a viernes: semana del 5, 3 de 5 hábiles (el sábado de 12.000 no suma) → ${semL.conMeta}/${semL.habiles}`,
+    semL.conMeta === 3 && semL.habiles === 5 && semL.total === 45500 && semL.serie[5].libre && !semL.serie[0].libre);
+  ok('un feriado tampoco tiene meta (lunes 12/10)', L.resumenPasos(PASOS, '2026-10-12', '2026-10-12', 6000, '2026-10-14', libre).habiles === 0);
+  {
+    const T = { habits: [{ ...CAMINAR, goal: { unidad: 'min', piso: 6, meta: 10, sube: 5, tope: 45, desde: '2026-09-01' } }],
+      marks: { '2026-10-07': { hP: 'yellow' }, '2026-10-08': { hP: 'yellow' } }, autoClosed: { '2026-10-07': ['hP'] },
+      settings: { metaPasos: 8000 }, createdAt: '2026-09-01',
+      pasos: { '2026-08-20': 9000, '2026-10-06': 9000, '2026-10-07': 8500, '2026-10-08': 9000, '2026-10-09': 7999,
+               '2026-10-10': 12000, '2026-10-12': 9000, '2026-10-14': 8100, '2026-10-15': 9000 } };
+    const M = cargarLogica(T);
+    const marcados = M.marcarPorPasos(T, '2026-10-14');
+    ok('llegar a 8.000 en día hábil marca "Caminar seguido" en verde solo: ' + marcados.join(), marcados.join() === '2026-10-06,2026-10-07,2026-10-14');
+    ok('como marca de la app (si la tocás, pasa a ser tuya)', M.originOf(T, '2026-10-06', 'hP') === 'auto' && M.getMark('2026-10-07', 'hP') === 'green');
+    ok('no toca lo que marcaste vos, ni el finde, ni el feriado, ni 7.999, ni el futuro, ni antes de empezar',
+      T.marks['2026-10-08'].hP === 'yellow' && !T.marks['2026-10-10'] && !T.marks['2026-10-12'] && !T.marks['2026-10-09']
+      && !T.marks['2026-10-15'] && !T.marks['2026-08-20']);
+    ok('marcar dos veces no cambia nada', M.marcarPorPasos(T, '2026-10-14').length === 0);
+    for (let i = 1; i <= 30; i++) (T.marks[M.iso(new Date(2026, 8, i))] ||= {}).hP = 'green';
+    M.evaluarProgresion(T, '2026-10-14');
+    ok('la meta en minutos del hábito de pasos ya no sube ni baja (se mide en pasos)', T.habits[0].goal.meta === 10);
+  }
   const anio = L.resumenAnual(PASOS, 2026, 6000, '2026-10-14');
   ok('año: un resumen por mes, octubre con su promedio y los demás vacíos', anio.length === 12 && anio[9].promedio === 6700 && anio[8].dias === 0);
 }
@@ -697,21 +720,26 @@ console.log('\n== 28. Pasos en la web ==');
   const st = { ...estado({ habits: [CAMINAR, { id: 'hA', name: 'Leer', order: 1 }] }), pasos: PASOS };
   st.settings.metaPasos = 6000;
   const { p, c, errs } = await abrirEn(HOY_FIJO, st);
+  const fila = p.locator('.hrow', { hasText: 'Caminar seguido' });
+  ok('en Hoy, "Caminar seguido" muestra los pasos de hoy contra la meta: ' + await fila.locator('.hsub').innerText(),
+    (await fila.locator('.hsub').innerText()).includes('2.500/6.000 pasos') && await fila.locator('.dot[data-goal]').count() === 0);
   await ir(p, 'pasos');
   const hero = async () => (await p.locator('.hero').first().innerText()).split('\n')[0];
   const stats = async () => (await p.locator('.stats .stat b').allInnerTexts()).join(' | ');
   ok('arranca en la semana actual: ' + await p.locator('.mnav b').innerText(), (await p.locator('.mnav b').innerText()) === '12 al 18 de octubre');
   ok('total de la semana 17.300: ' + await hero(), await hero() === '17.300');
-  ok('promedio 7.400, 1/3 días con meta, mejor 9K: ' + await stats(), await stats() === '7.400 | 1/3 | 9K');
+  ok('promedio 7.400; días hábiles con meta 0/2 (el lunes 12 es feriado); mejor 9K: ' + await stats(), await stats() === '7.400 | 0/2 | 9K');
   ok('no deja ir al futuro', await p.locator('[data-act="pmover"][data-n="1"]').isDisabled());
   ok('7 barras para tocar, la línea de meta en 6K', await p.locator('rect[data-act="pbar"]').count() === 7 && (await p.locator('svg').last().innerHTML()).includes('Meta 6K'));
   await p.locator('rect[data-act="pbar"][data-i="0"]').click();
-  ok('tocar una barra muestra el día: ' + await p.locator('#pdet').innerText(), (await p.locator('#pdet').innerText()) === 'Lun 12 oct: 9.000 pasos');
+  ok('tocar una barra muestra el día: ' + await p.locator('#pdet').innerText(), (await p.locator('#pdet').innerText()) === 'Lun 12 oct: 9.000 pasos · día libre');
+  ok('los días libres van en azul, sin meta (el feriado 12)', (await p.locator('svg path[fill="var(--free)"]').count()) === 1);
   await p.locator('[data-act="pmover"][data-n="-1"]').click(); await p.waitForTimeout(100);
   ok('la semana anterior: 45.500 y 6.500 por día', (await p.locator('.mnav b').innerText()) === '5 al 11 de octubre' && await hero() === '45.500' && (await stats()).startsWith('6.500'));
   await p.locator('[data-act="pvista"][data-v="mes"]').click(); await p.waitForTimeout(100);
-  ok('mes: octubre, 62.800 pasos, 6.700 por día, 5/10 con meta, mejor 12K', (await p.locator('.mnav b').innerText()) === 'Octubre 2026'
-    && await hero() === '62.800' && await stats() === '6.700 | 5/10 | 12K' && await p.locator('rect[data-act="pbar"]').count() === 31);
+  ok('mes: octubre, 62.800 pasos, 6.700 por día, 3/7 hábiles con meta (sin finde ni feriado), mejor 12K: ' + await stats(), (await p.locator('.mnav b').innerText()) === 'Octubre 2026'
+    && await hero() === '62.800' && await stats() === '6.700 | 3/7 | 12K' && await p.locator('rect[data-act="pbar"]').count() === 31
+    && await p.locator('svg path[fill="var(--free)"]').count() === 3);
   await p.locator('summary').click();
   ok('"Ver los números" lista los 10 días con pasos', await p.locator('details tr').count() === 11);
   await p.locator('[data-act="pvista"][data-v="anio"]').click(); await p.waitForTimeout(100);
@@ -722,7 +750,11 @@ console.log('\n== 28. Pasos en la web ==');
   ok('al cambiar de vista sigue en la fecha que venías mirando (mié 7)', (await p.locator('.mnav b').innerText()) === 'Mié 7 oct');
   ok('día cumplido: 6.500 pasos, 108 % (no se corta en 100)', await hero() === '6.500' && (await p.locator('.hero').innerText()).includes('108 % de la meta'));
   ok('vs. los 7 días anteriores (solo 2 con dato, promedio 6.000): ' + await stats(), await stats() === '6.000 | 6.000 | +500');
-  for (let i = 0; i < 7; i++) await p.locator('[data-act="pmover"][data-n="1"]').click();
+  await p.locator('[data-act="pmover"][data-n="1"]').click(); await p.locator('[data-act="pmover"][data-n="1"]').click(); await p.locator('[data-act="pmover"][data-n="1"]').click();
+  ok('un sábado es día libre: sin meta ni barra de avance', (await p.locator('.mnav b').innerText()) === 'Sáb 10 oct'
+    && (await p.locator('.hero').innerText()).includes('día libre, sin meta') && await p.locator('.meter').count() === 0
+    && (await stats()).startsWith('Libre'));
+  for (let i = 0; i < 4; i++) await p.locator('[data-act="pmover"][data-n="1"]').click();
   ok('día: hoy, 2.500 pasos, 42 % de la meta', (await p.locator('.mnav b').innerText()) === 'Hoy' && (await p.locator('.hero').innerText()).includes('42 % de la meta'));
   ok('día: meta, promedio de los 7 días anteriores y diferencia: ' + await stats(), await stats() === '6.000 | 6.900 | −4.400');
   ok('día: la semana de ese día con hoy resaltado', await p.locator('svg path[opacity]').count() === 2);
@@ -732,12 +764,12 @@ console.log('\n== 28. Pasos en la web ==');
   ok('la meta no acepta menos de 1.000', (await p.evaluate(() => window.__prime.S.settings.metaPasos)) === 6000 && await p.locator('#metaPasos').count() === 1);
   await p.locator('#metaPasos').fill('8000'); await p.locator('#metaPasos').press('Enter'); await p.waitForTimeout(150);
   ok('cambiar la meta a 8.000 mueve la línea y los días con meta', (await p.evaluate(() => window.__prime.S.settings.metaPasos)) === 8000
-    && (await p.locator('svg').last().innerHTML()).includes('Meta 8K') && /Meta diaria: 8\.000 pasos/.test(await p.locator('#view').innerText())
+    && (await p.locator('svg').last().innerHTML()).includes('Meta 8K') && /Meta de lunes a viernes: 8\.000 pasos/.test(await p.locator('#view').innerText())
     && (await stats()).startsWith('8.000'));
   await p.evaluate(() => { window.__prime.S.settings.metaPasos = 6000; window.__prime.save(); window.__prime.render(); });
-  ok('avisa que hay 9 días de "Caminar seguido" para marcar con los pasos', /9 días/.test(await p.locator('.alert.good').innerText()));
+  ok('avisa que hay 6 días hábiles de "Caminar seguido" para revisar (sin finde ni feriado)', /6 días/.test(await p.locator('.alert.good').innerText()));
   await p.locator('[data-act="pmarcar"]').click(); await p.waitForTimeout(150);
-  ok('"Revisar" abre la misma hoja que el import', (await p.locator('.sheet h3').innerText()) === 'Importar pasos' && await p.locator('.sheet input[type=checkbox]').count() === 9);
+  ok('"Revisar" abre la misma hoja que el import', (await p.locator('.sheet h3').innerText()) === 'Importar pasos' && await p.locator('.sheet input[type=checkbox]').count() === 6);
   await p.locator('.sheet [data-x="c"]').click();
   // CSV de Samsung Health: suma días y nunca baja uno que ya estaba
   const csv = ['com.samsung.shealth.step_daily_trend,6313002,1', 'update_time,source_pkg_name,count,distance,day_time,',
@@ -854,6 +886,21 @@ console.log('\n== 29. App de Android: pasos desde Health Connect ==');
   await p.locator('[data-act="hcAbrir"]').click(); await p.waitForTimeout(150);
   ok('y "Abrir Health Connect" lo abre', (await llamadas()).some(l => l.metodo === 'openHealthConnectSettings'));
   ok('no da por leído un día sin pasos (la próxima vez vuelve a mirar 29 días)', (await p.evaluate(() => window.__prime.S.settings.pasosHasta)) === undefined);
+  await c.close();
+
+  // Llegar a la meta en día hábil marca "Caminar seguido" solo, sin entrar a Pasos
+  ({ c, p, errs } = await abrirApp({ disponible: true, permiso: true, datos: [
+    { startDate: '2026-10-12T00:00', endDate: '2026-10-13T00:00', value: 9000 },
+    { startDate: '2026-10-13T00:00', endDate: '2026-10-14T00:00', value: 7000 },
+    { startDate: '2026-10-14T00:00', endDate: '2026-10-14T09:00', value: 6500 }] }));
+  await p.waitForTimeout(300);
+  const marcas = await p.evaluate(() => ({ hoy: window.__prime.getMark('2026-10-14', 'hP'), ayer: window.__prime.getMark('2026-10-13', 'hP'),
+    feriado: window.__prime.getMark('2026-10-12', 'hP') }));
+  ok('al abrir la app, los días hábiles que llegaron a la meta quedan en verde (hoy y ayer); el feriado no: ' + JSON.stringify(marcas),
+    marcas.hoy === 'green' && marcas.ayer === 'green' && marcas.feriado === null);
+  ok('Hoy ya muestra el hábito en verde y avisa', await p.locator('.hrow', { hasText: 'Caminar seguido' }).locator('.dot.s-green').count() === 1
+    && /en verde: llegaste a 6\.000 pasos/.test(await p.locator('body').innerText()));
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
   await c.close();
 
   ({ c, p, llamadas } = await abrirApp({ disponible: true, permiso: false, otorga: false, datos }));
