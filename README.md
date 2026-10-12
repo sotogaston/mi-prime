@@ -166,8 +166,12 @@ Lo que comés se carga de tres formas: **Sacar foto**, **Elegir foto** o
 la API de Anthropic, que devuelve cada plato con su porción, calorías y
 proteína; antes de guardar se puede corregir cada número, y una aclaración
 ("era media porción", "sin aceite") cambia la estimación. La foto no se guarda.
-Cada análisis cuesta unos 2 a 3 centavos de dólar en tu cuenta de Anthropic:
-la clave (*console.anthropic.com → API keys*) se carga en *Fotos con Claude*,
+En *Agregar a mano*, si no sabés las calorías, las dejás vacías y el botón pasa
+a **Calcular**: Claude estima a partir de lo que escribiste ("2 empanadas de
+carne"), con la misma hoja para corregir, y se guarda con tu texto como nombre.
+Cada cálculo cuesta unos 2 a 3 centavos de dólar (algo menos con texto) en tu
+cuenta de Anthropic, o sale de los créditos de API del plan Max: la clave
+(*platform.claude.com → Claves de API*) se carga en *Calorías con Claude*,
 queda solo en el teléfono y **no viaja en el respaldo**. Los últimos 7 días se
 ven en una tabla (verde: dentro de la meta o proteína alcanzada; amarillo: te
 pasaste de calorías).
@@ -190,7 +194,7 @@ analizar la primera foto.
 - **Semanas** — la planilla semanal: un hábito por vez en bloques 1-7 / 8-14 /
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
-- **Comida** — calorías y proteínas del día contra la meta, por foto o a mano.
+- **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
 - **Más** — hábitos (alta, edición, orden), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
 
@@ -208,7 +212,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                238 pruebas automatizadas (Playwright)
+├── test.mjs                245 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
