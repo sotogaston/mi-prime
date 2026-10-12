@@ -575,7 +575,7 @@ function evaluarProgresion(S, hoy){
 
   for(const h of S.habits){
     const g = h.goal;
-    if(!g || !g.desde) continue;
+    if(!g || !g.desde || h.auto?.source === "steps") continue;   // el de pasos se mide en pasos
     if(diasEntre(g.desde, hoy) < VENTANA) continue;
 
     let obligatorios = 0, llegoMeta = 0, llegoPiso = 0;
@@ -675,6 +675,7 @@ function planStepImport(S, stepsByDay, today){
     for(const date of dates){
       if(date >= today) continue;                       // el día en curso no se toca
       if(S.createdAt && date < S.createdAt) continue;
+      if(esLibre(date)) continue;                       // fin de semana o feriado: sin meta
       const steps = stepsByDay[date];
       const from = getMark(date, h.id);                  // un sin dato no es igual a un amarillo
       const origin = originOf(S, date, h.id);
@@ -720,7 +721,8 @@ function applyStepImport(S, plan, accepted){
    (Samsung Health a veces recalcula un día). El CSV de Samsung solo completa o
    sube. Un día sin registro no es un día con 0 pasos: no entra en el promedio. */
 /* Una sola meta de pasos: la de la pestaña Pasos y la que marca el hábito de
-   pasos ("Caminar seguido"). Se cambia en Pasos; sin tocar, 8000. */
+   pasos ("Caminar seguido"). Se cambia en Pasos; sin tocar, 8000. Vale de lunes
+   a viernes: fines de semana y feriados (esLibre) no tienen meta. */
 const META_PASOS = 8000;
 function metaPasos(S){ return S.settings?.metaPasos || META_PASOS; }
 function mezclarPasos(S, porDia, fuente){
@@ -755,23 +757,24 @@ function moverPasos(vista, ref, n){
 
 /* Total, promedio diario, días con meta y mejor día entre desde y hasta.
    El día en curso suma al total pero no al promedio (sigue sumando pasos),
-   salvo que sea el único día con dato. */
-function resumenPasos(pasos, desde, hasta, meta, hoy){
-  let total = 0, dias = 0, conMeta = 0, mejor = null;
+   salvo que sea el único día con dato. libre(ds) dice qué días no tienen meta:
+   suman al total y al promedio, pero no a "días con meta" (conMeta / habiles). */
+function resumenPasos(pasos, desde, hasta, meta, hoy, libre = () => false){
+  let total = 0, dias = 0, conMeta = 0, habiles = 0, mejor = null;
   const serie = [];
   for(let d = parseISO(desde); iso(d) <= hasta; d = addDays(d, 1)){
-    const ds = iso(d);
+    const ds = iso(d), sinMeta = libre(ds);
     const n = ds <= hoy ? pasos?.[ds] ?? null : null;
-    serie.push({ fecha: ds, pasos: n });
+    serie.push({ fecha: ds, pasos: n, libre: sinMeta });
     if(n == null) continue;
     total += n; dias++;
-    if(n >= meta) conMeta++;
+    if(!sinMeta){ habiles++; if(n >= meta) conMeta++; }
     if(!mejor || n > mejor.pasos) mejor = { fecha: ds, pasos: n };
   }
   const deHoy = desde <= hoy && hoy <= hasta ? pasos?.[hoy] : undefined;
   const cerrados = deHoy != null && dias > 1 ? dias - 1 : dias;
   const base = deHoy != null && dias > 1 ? total - deHoy : total;
-  return { total, dias, conMeta, mejor, serie,
+  return { total, dias, conMeta, habiles, mejor, serie,
            promedio: cerrados ? Math.round(base / cerrados) : 0, diasPromedio: cerrados };
 }
 /* Plan B si Health Connect no devuelve la suma por día: suma los registros
@@ -794,9 +797,27 @@ function pasosDeRegistros(registros){
 }
 
 /* Un resumen por mes del año: lo que dibuja la vista Año. */
-function resumenAnual(pasos, anio, meta, hoy){
+function resumenAnual(pasos, anio, meta, hoy, libre){
   return Array.from({ length: 12 }, (_, m) =>
-    Object.assign({ mes: m }, resumenPasos(pasos, iso(new Date(anio, m, 1)), iso(new Date(anio, m + 1, 0)), meta, hoy)));
+    Object.assign({ mes: m }, resumenPasos(pasos, iso(new Date(anio, m, 1)), iso(new Date(anio, m + 1, 0)), meta, hoy, libre)));
+}
+
+/* "Caminar seguido" es caminar la meta de pasos: llegar en un día hábil lo
+   marca solo en verde (como marca de la app, no tuya). Lo que marcaste vos no
+   se toca, un día libre no se mide y quedarse corto no marca nada: los
+   amarillos se revisan a mano (planStepImport). Devuelve los días marcados. */
+function marcarPorPasos(S, hoy){
+  const h = S.habits.find(x => x.auto?.source === "steps");
+  if(!h) return [];
+  const meta = metaPasos(S), marcados = [];
+  for(const [d, n] of Object.entries(S.pasos || {})){
+    if(d > hoy || (S.createdAt && d < S.createdAt) || esLibre(d) || n < meta) continue;
+    if(getMark(d, h.id) === ST.GREEN || originOf(S, d, h.id) === ORIGIN.MANUAL) continue;
+    setMark(d, h.id, ST.GREEN);
+    if(!(S.autoClosed?.[d] || []).includes(h.id)) markAutoClosed(S, d, h.id);
+    marcados.push(d);
+  }
+  return marcados.sort();
 }
 
 /* ---- horarios ----
@@ -1144,9 +1165,12 @@ function vHoy(){
     const danger = risk.includes(h);
     const hora = h.hora ? `<span>${horario(h)}</span>` : "";
     const ya = !free && st !== ST.GREEN && esAhora(h, ahora) ? `<span class="now">ahora</span>` : "";
-    const g = h.goal, val = S.values?.[TODAY]?.[h.id];
-    /* Enganche 5: el hábito con meta acepta toque largo para el valor real */
-    const meta = g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
+    /* El hábito de pasos se mide en pasos (se marca solo al llegar); el resto con
+       meta acepta toque largo para el valor real (enganche 5) */
+    const dePasos = h.auto?.source === "steps", hoyPasos = S.pasos?.[TODAY];
+    const g = dePasos ? null : h.goal, val = S.values?.[TODAY]?.[h.id];
+    const meta = dePasos ? (free ? "" : `<span>${hoyPasos != null ? fmt(hoyPasos) + "/" : ""}${fmt(metaPasos(S))} pasos</span>`)
+      : g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
     return `<div class="hrow">
       <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${esc(h.name)}">${stGlyph(st)}</button>
       <div class="hmeta">
@@ -1261,8 +1285,9 @@ function tituloPasos(vista, desde, hasta){
   return String(a.getFullYear());
 }
 
-/* Columnas: verde si llegó a la meta, gris si no; la línea marca la meta.
-   items: [{ eje, valor (null = sin dato), titulo }]; destacar = índice a resaltar */
+/* Columnas: verde si llegó a la meta, gris si no, azul si fue día libre (sin
+   meta); la línea marca la meta. items: [{ eje, valor (null = sin dato), libre,
+   titulo }]; destacar = índice a resaltar */
 function barrasPasos(items, meta, destacar){
   const W = 340, H = 168, L = 30, R = 6, T = 14, B = 20;
   const max = Math.max(meta, ...items.map(i => i.valor || 0));
@@ -1282,15 +1307,17 @@ function barrasPasos(items, meta, destacar){
       const y0 = y(0), y1 = Math.min(y(it.valor), y0 - 1), x0 = cx - ancho / 2, x1 = cx + ancho / 2;
       const r = Math.min(radio, y0 - y1);
       const tenue = destacar != null && i !== destacar ? ` opacity=".35"` : "";
+      const color = it.libre ? "var(--free)" : it.valor >= meta ? "var(--ok)" : "var(--muted)";
       barras += `<path d="M${x0},${y0}V${y1 + r}Q${x0},${y1} ${x0 + r},${y1}H${x1 - r}Q${x1},${y1} ${x1},${y1 + r}V${y0}Z" `
-              + `fill="${it.valor >= meta ? "var(--ok)" : "var(--muted)"}"${tenue}/>`;
+              + `fill="${color}"${tenue}/>`;
     }
     barras += `<rect data-act="pbar" data-i="${i}" x="${L + banda * i}" y="${T}" width="${banda}" height="${H - T - B}" fill="transparent">`
             + `<title>${esc(it.titulo)}</title></rect>`;
   });
   const ym = y(meta);
   const linea = `<line x1="${L}" x2="${W - R}" y1="${ym}" y2="${ym}" stroke="var(--ink-2)" stroke-width="1" pointer-events="none"/>`
-              + `<text x="${W - R}" y="${ym - 4}" text-anchor="end" class="eje fuerte" pointer-events="none">Meta ${compacto(meta)}</text>`;
+              + `<text x="${W - R}" y="${ym - 4}" text-anchor="end" class="eje fuerte" pointer-events="none"
+                  stroke="var(--surface)" stroke-width="3" paint-order="stroke">Meta ${compacto(meta)}</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pasos por ${items.length === 12 ? "mes" : "día"}">${fondo}${barras}${linea}${ejes}</svg>`;
 }
 
@@ -1331,8 +1358,8 @@ function vPasos(){
 
   let cuerpo, filas;
   if(PASOS_VISTA === "anio"){
-    const meses = resumenAnual(pasos, parseISO(desde).getFullYear(), meta, TODAY);
-    const r = resumenPasos(pasos, desde, hasta, meta, TODAY);
+    const meses = resumenAnual(pasos, parseISO(desde).getFullYear(), meta, TODAY, esLibre);
+    const r = resumenPasos(pasos, desde, hasta, meta, TODAY, esLibre);
     PASOS_ITEMS = meses.map(x => ({ eje: MESES[x.mes][0].toUpperCase(), valor: x.dias ? x.promedio : null,
       titulo: x.dias ? `${cap(MESES[x.mes])}: ${fmt(x.promedio)} pasos por día · ${fmt(x.total)} en total` : `${cap(MESES[x.mes])}: sin datos` }));
     cuerpo = heroPasos(r.total, "pasos en el año") + statsPasos(r) + `<div class="card"><div class="card-t">Promedio diario de cada mes</div>
@@ -1342,27 +1369,28 @@ function vPasos(){
   } else {
     // Día: la semana de ese día, con el día resaltado
     const rango = PASOS_VISTA === "dia" ? rangoPasos("semana", PASOS_REF) : { desde, hasta };
-    const r = resumenPasos(pasos, rango.desde, rango.hasta, meta, TODAY);
+    const r = resumenPasos(pasos, rango.desde, rango.hasta, meta, TODAY, esLibre);
     const mes = PASOS_VISTA === "mes";
     PASOS_ITEMS = r.serie.map(x => {
       const d = parseISO(x.fecha).getDate();
-      return { fecha: x.fecha, valor: x.pasos,
+      return { fecha: x.fecha, valor: x.pasos, libre: x.libre,
         eje: mes ? (d === 1 || d % 5 === 0 ? String(d) : "") : DIAS[parseISO(x.fecha).getDay()],
-        titulo: `${cap(fechaCorta(x.fecha))}: ` + (x.pasos == null ? "sin datos" : `${fmt(x.pasos)} pasos`) };
+        titulo: `${cap(fechaCorta(x.fecha))}: ` + (x.pasos == null ? "sin datos" : `${fmt(x.pasos)} pasos`) + (x.libre ? " · día libre" : "") };
     });
     const grafico = `<div class="card"><div class="card-t">Pasos por día</div>${barrasPasos(PASOS_ITEMS, meta,
       PASOS_VISTA === "dia" ? PASOS_ITEMS.findIndex(x => x.fecha === PASOS_REF) : null)}
       <p class="pdet" id="pdet">Tocá una barra para ver el día</p>${lineaMeta(meta)}</div>`;
     if(PASOS_VISTA === "dia"){
-      const n = pasos[PASOS_REF];
+      const n = pasos[PASOS_REF], libre = esLibre(PASOS_REF);
       const previos = resumenPasos(pasos, iso(addDays(parseISO(PASOS_REF), -7)), iso(addDays(parseISO(PASOS_REF), -1)), meta, TODAY);
       const pct = n == null ? 0 : Math.round(100 * n / meta);
       const dif = n != null && previos.dias ? n - previos.promedio : null;
-      cuerpo = `<div class="card">${heroInner(n == null ? "—" : fmt(n), n == null ? "sin datos de este día" : `pasos · ${pct} % de la meta`)}
-        <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${n ?? 0}" aria-label="Avance hacia la meta">
-          <i style="width:${Math.min(100, pct)}%;background:${n >= meta ? "var(--ok)" : "var(--muted)"}"></i></div></div>
+      const sub = n == null ? "sin datos de este día" : libre ? "pasos · día libre, sin meta" : `pasos · ${pct} % de la meta`;
+      cuerpo = `<div class="card">${heroInner(n == null ? "—" : fmt(n), sub)}
+        ${libre ? "" : `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="${meta}" aria-valuenow="${n ?? 0}" aria-label="Avance hacia la meta">
+          <i style="width:${Math.min(100, pct)}%;background:${n >= meta ? "var(--ok)" : "var(--muted)"}"></i></div>`}</div>
         <div class="stats chico">
-          <div class="stat"><b>${fmt(meta)}</b><span>Meta</span></div>
+          <div class="stat"><b>${libre ? "Libre" : fmt(meta)}</b><span>Meta</span></div>
           <div class="stat"><b>${previos.dias ? fmt(previos.promedio) : "—"}</b><span>Promedio 7 días</span></div>
           <div class="stat"><b>${dif == null ? "—" : (dif >= 0 ? "+" : "−") + fmt(Math.abs(dif))}</b><span>Vs. promedio</span></div>
         </div>` + grafico;
@@ -1397,11 +1425,11 @@ function vPasos(){
   ${historial}${NATIVO ? "" : tarjetaFuentePasos()}`;
 }
 function lineaMeta(meta){
-  return `<p style="text-align:center;margin:6px 0 0"><button class="linkbtn" data-act="pmeta">Meta diaria: ${fmt(meta)} pasos · Cambiar</button></p>`;
+  return `<p style="text-align:center;margin:6px 0 0"><button class="linkbtn" data-act="pmeta">Meta de lunes a viernes: ${fmt(meta)} pasos · Cambiar</button></p>`;
 }
 function editarMetaPasos(){
   sheet(`<h3>Meta diaria de pasos</h3>
-    <p class="sub">Es la línea del gráfico y la que marca “Caminar seguido” en verde.</p>
+    <p class="sub">Vale de lunes a viernes; fines de semana y feriados no tienen meta. Llegar a la meta marca “Caminar seguido” en verde.</p>
     <input type="number" id="metaPasos" inputmode="numeric" min="1000" max="50000" step="500" value="${metaPasos(S)}">
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
   const inp = modal.querySelector("#metaPasos");
@@ -1421,7 +1449,7 @@ function heroPasos(total, sub){ return `<div class="card">${heroInner(fmt(total)
 function statsPasos(r){
   return `<div class="stats chico">
     <div class="stat"><b>${r.diasPromedio ? fmt(r.promedio) : "—"}</b><span>Promedio diario</span></div>
-    <div class="stat"><b>${r.conMeta}/${r.dias}</b><span>Días con meta</span></div>
+    <div class="stat"><b>${r.conMeta}/${r.habiles}</b><span>Días hábiles con meta</span></div>
     <div class="stat"><b>${r.mejor ? compacto(r.mejor.pasos) : "—"}</b><span>${r.mejor ? `Mejor · ${parseISO(r.mejor.fecha).getDate()} ${MESES_CORTOS[parseISO(r.mejor.fecha).getMonth()]}` : "Mejor día"}</span></div>
   </div>`;
 }
@@ -1824,9 +1852,10 @@ function doImportPasos(){
       let steps;
       try{ steps = parseSamsungSteps(String(r.result)); }
       catch(e){ toast(e.message); return; }
-      const n = mezclarPasos(S, steps, "csv");
+      const n = mezclarPasos(S, steps, "csv"), verdes = marcarPorPasos(S, TODAY).length;
       save(); render();
-      toast(n ? `${n} ${n === 1 ? "día de pasos cargado" : "días de pasos cargados"}` : "Los pasos ya estaban cargados");
+      toast((n ? `${n} ${n === 1 ? "día de pasos cargado" : "días de pasos cargados"}` : "Los pasos ya estaban cargados")
+        + (verdes ? ` · ${verdes} en verde en “${caminando()}”` : ""));
       if(S.habits.some(h => h.auto?.source === "steps"))
         setTimeout(() => marcarConPasos(true), n ? 1200 : 0);
     };
@@ -2022,6 +2051,7 @@ function sincronizarPasos(pedirPermiso = false){
     const r = pasosDeRegistros(records);
     return { porDia: r.porDia, como: Object.keys(r.porDia).length ? "registros" : "nada" };
   };
+  let marcados = [];
   pasosEnCurso = (async () => {
     try{
       const { available } = await HC("isHealthAvailable");
@@ -2037,24 +2067,27 @@ function sincronizarPasos(pedirPermiso = false){
       catch(e){ if(desde >= tope) throw e; r = await leer(tope); }   // la ventana se achicó (permiso dado de nuevo)
       mezclarPasos(S, r.porDia, "hc");
       if(r.como !== "nada") S.settings.pasosHasta = TODAY;
+      marcados = marcarPorPasos(S, TODAY);
       save();
       PASOS_ESTADO = { ok: true, cuando: new Date(), como: r.como, dias: Object.keys(r.porDia).length };
     }catch(e){
       PASOS_ESTADO = { error: "fallo", detalle: e?.message || String(e) };
     }finally{
       pasosEnCurso = null;
-      if(TAB === "pasos") render();
+      if(TAB === "pasos" || marcados.length) render();
+      if(marcados.includes(TODAY)) toast(`“${caminando()}” en verde: llegaste a ${fmt(metaPasos(S))} pasos`);
     }
   })();
   return pasosEnCurso;
 }
 if(NATIVO) setInterval(() => { if(!document.hidden && TAB === "pasos") sincronizarPasos(); }, 120000);
+function caminando(){ return S.habits.find(h => h.auto?.source === "steps")?.name || "Caminar"; }
 sincronizarPasos();
 
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
-  /* pasos */ metaPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
+  /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
 </body>
 </html>

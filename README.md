@@ -114,9 +114,13 @@ En una compu con el SDK de Android también se compila firmado con
 La pestaña **Pasos** muestra los pasos por día, semana (lunes a domingo), mes y
 año, como Samsung Health: el total, el promedio diario, los días que llegaste a
 la meta y el mejor día, con un gráfico de barras (verde = llegó a la meta) y la
-tabla de números. La meta diaria es una sola (8.000 si no se cambió; *Meta
-diaria · Cambiar* debajo del gráfico) y es también la que marca *Caminar
-seguido*.
+tabla de números. La meta es una sola (8.000 si no se cambió; *Cambiar*
+debajo del gráfico) y vale **de lunes a viernes**: sábados, domingos y feriados
+son días libres (barra azul), suman al total y al promedio pero no a *días
+hábiles con meta*. *Caminar seguido* es llegar a esa meta: en un día hábil, al
+llegar se marca solo en verde (como marca de la app; lo que marcaste vos no se
+toca) y Hoy muestra los pasos del día contra la meta. Quedarse corto no marca
+nada solo: esos días se revisan con *Revisar*.
 
 - **En la app de Android** se leen solos de **Health Connect**, donde Samsung
   Health comparte los pasos (Samsung Health → Ajustes → Health Connect → que
@@ -169,7 +173,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                197 pruebas automatizadas (Playwright)
+├── test.mjs                210 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── gen-icons.mjs           regenera los íconos (web y Android)
