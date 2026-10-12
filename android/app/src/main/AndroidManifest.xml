@@ -56,9 +56,13 @@
         </activity-alias>
     </application>
 
-    <!-- Health Connect como app aparte (Android 13 o menos) -->
+    <!-- Health Connect como app aparte (Android 13 o menos), y la cámara: desde Android 11
+         sin esto el botón "Sacar foto" no encuentra la cámara y abre la galería -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
     </queries>
 
     <!-- Permissions -->
