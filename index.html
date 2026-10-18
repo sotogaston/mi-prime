@@ -325,6 +325,7 @@ function migrate(s){
   s.feriados ||= []; s.laborables ||= []; // feriados propios y feriados que se trabajan (ver esLibre)
   s.pasos ||= {};                          // pasos por día: Health Connect o el CSV de Samsung Health
   s.comidas ||= {}; s.pesos ||= {};        // comidas por día y peso por día (pestaña Comida)
+  s.cinturas ||= {};                       // cintura en cm por día
   s.frecuentes ||= [];                     // comidas que se repiten, para cargarlas con un toque
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
@@ -898,6 +899,20 @@ function normalizarAnalisis(r){
     .map(i => ({ nombre: i.nombre.trim().slice(0, 60), porcion: String(i.porcion || "").slice(0, 60),
                  kcal: num(i.kcal, 5000), prot: num(i.proteina_g, 400) }));
   return { items, nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
+}
+
+/* ---- cintura ----
+   La relación cintura/altura sana es menos de 0,5: la cintura, menos de media
+   altura. S.cinturas = { "2026-10-18": 95 }; la última también va en perfil.cintura. */
+function cinturaAltura(cm, altura){
+  if(!(cm > 0 && altura > 0)) return null;
+  return { ratio: Math.round(cm / altura * 100) / 100, sana: Math.floor(altura / 2) };
+}
+/* Cuánto cambió desde la primera medida; null si hay una sola */
+function cambioCintura(cinturas){
+  const d = Object.keys(cinturas || {}).sort();
+  if(d.length < 2) return null;
+  return { desde: d[0], cambio: Math.round((cinturas[d.at(-1)] - cinturas[d[0]]) * 10) / 10 };
 }
 
 /* ---- tipo de comida ----
@@ -1696,9 +1711,10 @@ function vComida(){
   const cuerpo = m ? `<div class="card"><div class="card-t">Tu meta</div>
       <p style="margin:0;font-size:14.5px;line-height:1.55"><b>${fmt1(p.peso)} kg</b> → ${fmt1(p.pesoMeta)} kg
         ${m.faltan ? `· faltan ${fmt1(m.faltan)} kg (≈ ${m.semanas} ${m.semanas === 1 ? "semana" : "semanas"} a ${fmt1(p.ritmo)} kg por semana)` : "· ¡llegaste! La meta es mantener"}</p>
+      ${lineaCintura(p)}
       <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.5">Gastás unas ${fmt(m.gasto)} kcal por día (base ${fmt(m.tmb)}, Mifflin-St Jeor por tu actividad)${m.deficit ? `; para bajar ${fmt1(p.ritmo)} kg por semana comés ${fmt(m.deficit)} menos` : ""}. Proteína: 1,8 g por kilo. Son estimaciones: si en 2 o 3 semanas el peso no se mueve, bajá un poco la meta.</p>
       <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
-        <button class="btn ghost" data-act="cpeso" style="margin:0">Registrar peso</button>
+        <button class="btn ghost" data-act="cpeso" style="margin:0">Registrar medidas</button>
         <button class="btn ghost" data-act="cperfil" style="margin:0">Editar perfil</button></div></div>` : "";
   const ia = `<div class="card"><div class="card-t">Calorías con Claude</div>
     <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto, o lo que escribís en “Agregar a mano” sin poner las calorías, se manda a Claude Opus 5.5 (Anthropic), que estima calorías y proteína; la foto no se guarda en la app.
@@ -1840,6 +1856,14 @@ function verDia(fecha){
   modal.querySelectorAll('[data-act="cborrar"]').forEach(b => b.onclick = () => confirmarBorrado(fecha, +b.dataset.i, () => verDia(fecha)));
 }
 function fmt1(n){ return Number(n).toLocaleString("es-AR", { maximumFractionDigits: 1 }); }
+function lineaCintura(p){
+  const r = cinturaAltura(p.cintura, p.altura); if(!r) return "";
+  const c = cambioCintura(S.cinturas), d = c && parseISO(c.desde);
+  return `<p class="cintura" style="margin:8px 0 0;font-size:14.5px;line-height:1.55">Cintura <b>${fmt1(p.cintura)} cm</b>${c?.cambio
+      ? ` · ${c.cambio < 0 ? "−" : "+"}${fmt1(Math.abs(c.cambio))} cm desde el ${d.getDate()} de ${MESES[d.getMonth()]}` : ""}
+    · cintura/altura <b>${r.ratio.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b>${r.ratio < 0.5 ? " ✓"
+      : ` <span style="color:var(--muted)">(sana: menos de 0,5, o sea menos de ${r.sana} cm)</span>`}</p>`;
+}
 function horaAhora(){ const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
 /* Hoy lleva la hora de ahora; un día pasado, la que se cargó (o ninguna) */
 function guardarComida(c, fecha = TODAY){
@@ -1877,17 +1901,25 @@ function editarPerfil(){
     toast(`Meta: ${fmt(m.kcal)} kcal y ${fmt(m.prot)} g de proteína por día`);
   };
 }
+/* Peso y cintura de hoy. La cintura es opcional: vacía no se registra. */
 function registrarPeso(){
-  sheet(`<h3>Peso de hoy</h3><p class="sub">Recalcula la meta con tu peso nuevo.</p>
-    <input type="number" id="pPesoHoy" inputmode="decimal" step="0.1" min="30" max="300" value="${S.perfil.peso}">
+  sheet(`<h3>Medidas de hoy</h3><p class="sub">El peso recalcula la meta. La cintura, a la altura del ombligo, de pie y después de soltar el aire; con una vez por semana alcanza.</p>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo">Peso (kg)</label><input type="number" id="pPesoHoy" inputmode="decimal" step="0.1" min="30" max="300" value="${S.perfil.peso}"></div>
+      <div><label class="campo">Cintura (cm)</label><input type="number" id="pCintura" inputmode="decimal" step="0.5" min="40" max="200"
+        placeholder="${S.perfil.cintura ? "Última: " + fmt1(S.perfil.cintura) : "Opcional"}"></div></div>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
-  const inp = modal.querySelector("#pPesoHoy"); inp.focus(); inp.select();
+  const inp = modal.querySelector("#pPesoHoy"), cin = modal.querySelector("#pCintura"); inp.focus(); inp.select();
+  const num = el => Math.round(Number(String(el.value).replace(",", ".")) * 10) / 10;
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="o"]').onclick = () => {
-    const n = Math.round(Number(String(inp.value).replace(",", ".")) * 10) / 10;
+    const n = num(inp), c = cin.value.trim() === "" ? null : num(cin);
     if(!(n >= 30 && n <= 300)){ toast("Poné un peso entre 30 y 300 kg"); return; }
-    S.perfil.peso = n; (S.pesos ||= {})[TODAY] = n; save(); closeSheet(); render();
-    toast(`Peso ${fmt1(n)} kg · meta ${fmt(metasNutricion(S.perfil).kcal)} kcal`);
+    if(c !== null && !(c >= 40 && c <= 200)){ toast("Poné la cintura en centímetros, entre 40 y 200"); return; }
+    S.perfil.peso = n; (S.pesos ||= {})[TODAY] = n;
+    if(c !== null){ S.perfil.cintura = c; (S.cinturas ||= {})[TODAY] = c; }
+    save(); closeSheet(); render();
+    toast(`Peso ${fmt1(n)} kg${c !== null ? ` · cintura ${fmt1(c)} cm` : ""} · meta ${fmt(metasNutricion(S.perfil).kcal)} kcal`);
   };
 }
 /* Con clave y sin calorías, el botón es "Calcular": Claude estima a partir de lo escrito.
@@ -2302,8 +2334,9 @@ function prepararRespaldo(texto){
   if(data.pasos && !Object.entries(data.pasos).every(([d, n]) => esFecha(d) && Number.isInteger(n) && n >= 0))
     throw new Error(`El campo "pasos" está roto.`);
   const esNum = x => typeof x === "number" && Number.isFinite(x) && x >= 0;
-  if(data.pesos != null && !(esObj(data.pesos) && Object.entries(data.pesos).every(([d, n]) => esFecha(d) && esNum(n))))
-    throw new Error(`El campo "pesos" está roto.`);
+  for(const k of ["pesos", "cinturas"])
+    if(data[k] != null && !(esObj(data[k]) && Object.entries(data[k]).every(([d, n]) => esFecha(d) && esNum(n))))
+      throw new Error(`El campo "${k}" está roto.`);
   if(data.comidas != null && !(esObj(data.comidas) && Object.entries(data.comidas).every(([d, l]) => esFecha(d) && Array.isArray(l)
       && l.every(c => esObj(c) && typeof c.nombre === "string" && esNum(c.kcal) && esNum(c.prot) && (c.tipo == null || Object.hasOwn(TIPOS_COMIDA, c.tipo))))))
     throw new Error(`El campo "comidas" está roto.`);
@@ -2763,6 +2796,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
   /* comida */ metasNutricion, totalComidas, normalizarAnalisis, claveIA,
   /* reflexión */ fraseDelDia, loQueSeCocina, REFLEXIONES,
+  /* cintura */ cinturaAltura, cambioCintura,
   /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
