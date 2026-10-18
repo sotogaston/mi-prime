@@ -162,7 +162,10 @@ Con 73,2 kg, 164 cm, 39 años, hombre, moderado y 0,5 kg por semana da unas
 *Registrar medidas* guarda el peso, que recalcula todo, y la cintura (opcional,
 una vez por semana alcanza): *Tu meta* muestra cuánto cambió desde la primera
 medida y la relación cintura/altura, que es sana por debajo de 0,5 (con 164 cm,
-menos de 82 cm de cintura).
+menos de 82 cm de cintura). Debajo, la **meta de cintura** con fecha estimada y
+la próxima etapa (0,55 y 0,525 de la altura): al principio sale del ritmo de
+peso (~0,9 cm por kilo) y, con dos semanas de medidas, de lo que viene bajando,
+entre 0,15 y 0,75 cm por semana.
 
 Lo que comés se carga de tres formas: **Sacar foto**, **Elegir foto** o
 **Agregar a mano**. La foto (achicada a 1024 px) va a **Claude Opus 5.5** con
@@ -234,7 +237,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                308 pruebas automatizadas (Playwright)
+├── test.mjs                314 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
