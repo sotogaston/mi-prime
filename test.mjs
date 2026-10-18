@@ -1048,34 +1048,207 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   await c.close();
 }
 
-console.log('\n== 32. Reflexión de hoy ==');
+console.log('\n== 32. Reflexión de la mañana y de la tarde ==');
 {
   const marks = { '2026-09-03': { hA: 'green', hB: 'yellow' }, '2026-10-13': { hA: 'green', hB: 'green' } };
   const L = cargarLogica(estado({ marks }));
-  const semana = ['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19'].map(d => L.fraseDelDia(d).t);
-  ok('una frase por día, sin repetir en 6 días seguidos', L.REFLEXIONES.length === 6 && new Set(semana).size === 6
-    && L.fraseDelDia('2026-10-14') === L.fraseDelDia('2026-10-14') && L.fraseDelDia('2026-10-20') === L.fraseDelDia('2026-10-14'));
-  ok('están la de la disciplina, la de quedarse quieto y la de Aristóteles', L.REFLEXIONES.some(f => /cada año termina igual/.test(f.t))
+  const dias = Array.from({ length: 400 }, (_, i) => L.iso(new Date(2026, 9, 1 + i)));
+  const turnos = dias.flatMap(d => [L.fraseDelDia(d), L.fraseDelDia(d, true)]);
+  ok('16 frases: las 6 de antes y 10 nuevas sobre la disciplina', L.REFLEXIONES.length === 16 && new Set(L.REFLEXIONES.map(f => f.t)).size === 16);
+  ok('cada día la de la mañana y la de la tarde son distintas, y nunca se repite la anterior', turnos.every((f, i) => i === 0 || f !== turnos[i - 1]));
+  const inicio = dias.findIndex(d => Math.round(new Date(d + 'T00:00').getTime() / 864e5) * 2 % 16 === 0);
+  const mazo = turnos.slice(inicio * 2, inicio * 2 + 16);
+  ok('en orden aleatorio y sin repetir hasta pasar por las 16 (8 días)', new Set(mazo).size === 16
+    && mazo.map(f => L.REFLEXIONES.indexOf(f)).join() !== [...Array(16).keys()].join());
+  ok('es la misma frase si se vuelve a abrir el mismo día', L.fraseDelDia('2026-10-14', true) === L.fraseDelDia('2026-10-14', true));
+  ok('siguen la de la disciplina, la de quedarse quieto y la de Aristóteles', L.REFLEXIONES.some(f => /cada año termina igual/.test(f.t))
     && L.REFLEXIONES.some(f => /quedarte en el mismo lugar duele más que avanzar/.test(f.t))
     && L.REFLEXIONES.some(f => /La calidad no es un acto, es un hábito/.test(f.t) && /Aristóteles/.test(f.de)));
   ok('lo que se está cocinando: cuenta los verdes y desde cuándo', JSON.stringify(L.loQueSeCocina(estado({ marks }))) === '{"verdes":3,"desde":"2026-09-03"}'
     && L.loQueSeCocina(estado()).verdes === 0);
 
   const { p, c: ctx, errs } = await abrirEn(HOY_FIJO, estado({ marks }));
-  const frase = await p.evaluate(d => window.__prime.fraseDelDia(d).t, HOY_FIJO);
-  ok('Hoy muestra la reflexión del día', /Reflexión de hoy/.test(await p.locator('.reflex').textContent())
-    && (await p.locator('.reflex .frase').innerText()) === frase);
+  const [manana, tarde] = await p.evaluate(d => [window.__prime.fraseDelDia(d).t, window.__prime.fraseDelDia(d, true).t], HOY_FIJO);
+  ok('a las 12 Hoy muestra la reflexión de la mañana', /Reflexión de la mañana/.test(await p.locator('.reflex').textContent())
+    && (await p.locator('.reflex .frase').innerText()) === manana);
   await p.locator('.reflex').click(); await p.waitForTimeout(100);
-  ok('tocándola se ven todas, con la de hoy marcada', await p.locator('.sheet blockquote').count() === 6
-    && (await p.locator('.sheet blockquote.hoy').innerText()).startsWith(frase));
+  ok('tocándola se ven las 16, con las dos de hoy marcadas', await p.locator('.sheet blockquote').count() === 16
+    && await p.locator('.sheet blockquote.hoy').count() === 2 && /Hoy a la mañana/.test(await p.locator('.sheet').innerText())
+    && /Hoy a la tarde/.test(await p.locator('.sheet').innerText()));
   ok('y lo acumulado: 3 veces en verde desde el 3 de septiembre', /3 veces en verde desde el 3 de septiembre/.test(await p.locator('.sheet .cocina').innerText()));
   await p.locator('.sheet [data-x="c"]').click(); await p.waitForTimeout(100);
   ok('"Seguir" la cierra', await p.locator('.sheet').count() === 0);
+  await ctx.clock.setFixedTime(new Date(HOY_FIJO + 'T15:00:00'));
+  await p.evaluate(() => window.__prime.render()); await p.waitForTimeout(100);
+  ok('desde las 14 cambia a la de la tarde, que es otra', /Reflexión de la tarde/.test(await p.locator('.reflex').textContent())
+    && (await p.locator('.reflex .frase').innerText()) === tarde && tarde !== manana);
   ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
   await ctx.close();
 }
 
-console.log('\n== 33. Capturas ==');
+console.log('\n== 33. Comidas: tipo, aviso de las 22, editar, frecuentes e historial ==');
+{
+  const L = cargarLogica(estado());
+  ok('el tipo sale de la hora: desayuno hasta las 11, almuerzo hasta 16:30, merienda hasta 20:30, después cena',
+    ['08:30', '10:59', '11:00', '16:29', '16:30', '20:29', '20:30', '02:00'].map(L.tipoPorHora).join() === 'desayuno,desayuno,almuerzo,almuerzo,merienda,merienda,cena,cena'
+    && L.tipoPorHora('') === null);
+  ok('el tipo elegido manda sobre la hora, y sin hora ni tipo es colación', L.tipoDe({ hora: '13:47', tipo: 'desayuno' }) === 'desayuno'
+    && L.tipoDe({ hora: '13:47' }) === 'almuerzo' && L.tipoDe({}) === 'colacion' && L.tipoDe({ hora: '9:00', tipo: 'brunch' }) === 'colacion');
+  ok('faltan las que no se cargaron; la colación no cuenta', L.faltanComidas([{ hora: '08:30' }, { hora: '13:40' }, { tipo: 'colacion' }]).join() === 'merienda,cena'
+    && L.faltanComidas(undefined).length === 4 && L.nombresComidas(['desayuno', 'merienda', 'cena']) === 'el desayuno, la merienda y la cena');
+  const com = { '2026-10-14': [{ hora: '08:30' }, { hora: '13:40' }] };
+  const plan = L.planAvisoComidas(com, new Date(2026, 9, 14, 15, 0), 3, '22:00');
+  ok('a las 22 avisa qué falta hoy; los días que vienen, que no hay nada cargado', plan.length === 3 && plan[0].id === 500000
+    && plan[0].title === 'Falta cargar la merienda y la cena' && plan[0].at.getHours() === 22 && plan[1].title === 'No cargaste ninguna comida hoy'
+    && plan.every(a => a.canal === 'comidas'));
+  ok('con las cuatro cargadas, o pasada la hora, hoy no avisa', L.planAvisoComidas({ '2026-10-14': ['08:00', '13:00', '18:00', '21:00'].map(hora => ({ hora })) },
+      new Date(2026, 9, 14, 21, 30), 1, '22:00').length === 0 && L.planAvisoComidas(com, new Date(2026, 9, 14, 22, 30), 1, '22:00').length === 0
+    && L.planAvisoComidas(com, new Date(2026, 9, 14, 8, 0), 14, 'no').length === 0);
+
+  const yo = { sexo: 'h', edad: 39, altura: 164, peso: 72.2, pesoMeta: 70, ritmo: 0.5, actividad: 1.55 };
+  const st = { ...estado(), perfil: yo, comidas: {
+    [HOY_FIJO]: [{ id: 'a', hora: '08:30', nombre: 'Café con leche y 2 huevos', kcal: 350, prot: 21 },
+                 { id: 'b', hora: '13:40', nombre: 'Fideos con pollo', kcal: 535, prot: 28 }],
+    '2026-10-13': [{ id: 'c', hora: '08:32', nombre: 'Café', kcal: 350, prot: 21 }, { id: 'd', hora: '13:33', nombre: 'Sanguche', kcal: 402, prot: 27 },
+                   { id: 'e', hora: '19:53', nombre: 'Jugo y nueces', kcal: 317, prot: 7 }, { id: 'f', hora: '22:06', nombre: 'Pizza', kcal: 735, prot: 35 }],
+    '2026-10-12': [{ id: 'g', hora: '12:19', nombre: 'Tostado', kcal: 366, prot: 15 }] } };
+  const { p, c: ctx, errs } = await abrirEn(HOY_FIJO, st);
+  const S = () => p.evaluate(() => window.__prime.S);
+  ok('a las 12 no hay alerta de comidas', await p.locator('.alerta-comidas').count() === 0);
+  await ir(p, 'comida');
+  ok('cada comida dice qué es: desayuno y almuerzo', (await p.locator('.comida .hm').allInnerTexts()).map(t => t.split('\n')[0]).join() === 'Desayuno,Almuerzo');
+  ok('y abajo cuándo avisa', /A las 22:00|Desde las 22:00/.test(await p.locator('.pie').first().innerText()));
+  // Editar
+  await p.locator('[data-act="ceditar"][data-i="0"]').click(); await p.waitForTimeout(100);
+  ok('tocar una comida la abre para editar', (await p.locator('#eNombre').inputValue()) === 'Café con leche y 2 huevos' && (await p.locator('#eTipo').inputValue()) === 'desayuno');
+  await p.locator('#eKcal').fill('380'); await p.locator('#eFrec').check();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  let s = await S();
+  ok('guarda los cambios y la suma a frecuentes como desayuno', s.comidas[HOY_FIJO][0].kcal === 380 && s.comidas[HOY_FIJO][0].tipo === 'desayuno'
+    && s.frecuentes.length === 1 && s.frecuentes[0].tipo === 'desayuno' && s.frecuentes[0].kcal === 380);
+  ok('a las 12 no muestra el desayuno frecuente (es hora de almuerzo)', await p.locator('#view .frec').count() === 0
+    && /Frecuentes \(1\)/.test(await p.locator('[data-act="cfrecs"]').innerText()));
+  // Frecuentes: un toque y queda cargada
+  await p.locator('[data-act="cfrecs"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet [data-act="cfrec"]').click(); await p.waitForTimeout(150);
+  s = await S();
+  ok('una frecuente se carga con un toque, como desayuno aunque sean las 12', s.comidas[HOY_FIJO].length === 3
+    && s.comidas[HOY_FIJO][2].tipo === 'desayuno' && s.comidas[HOY_FIJO][2].origen === 'frecuente' && s.comidas[HOY_FIJO][2].kcal === 380);
+  await p.locator('[data-act="cfrecs"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet [data-q]').click(); await p.waitForTimeout(100);
+  ok('y se puede sacar de frecuentes', (await S()).frecuentes.length === 0);
+  await p.locator('.sheet [data-x="c"]').click(); await p.waitForTimeout(100);
+  // A mano con tipo y frecuente
+  await p.locator('[data-act="cmano"]').click(); await p.waitForTimeout(100);
+  ok('a mano propone el tipo por la hora', (await p.locator('#cTipo').inputValue()) === 'almuerzo');
+  await p.locator('#cNombre').fill('Yogur con granola'); await p.locator('#cTipo').selectOption('merienda');
+  await p.locator('#cKcal').fill('250'); await p.locator('#cProt').fill('15'); await p.locator('#cFrec').check();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  s = await S();
+  ok('a mano se guarda con el tipo elegido y como frecuente', s.comidas[HOY_FIJO][3].tipo === 'merienda' && s.frecuentes.length === 1 && s.frecuentes[0].nombre === 'Yogur con granola');
+  // Historial
+  await p.locator('tr[data-d="2026-10-13"]').click(); await p.waitForTimeout(100);
+  ok('tocar un día de la tabla muestra lo que comiste ese día', await p.locator('.sheet .comida').count() === 4
+    && /1\.804 kcal de 1\.860/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="ant"]').click(); await p.waitForTimeout(100);
+  ok('‹ va al día anterior', /lun 12 oct/.test(await p.locator('.sheet .mnav b').textContent()) && await p.locator('.sheet .comida').count() === 1
+    && /Sin cargar: el desayuno, la merienda y la cena/.test(await p.locator('.sheet').innerText()));
+  ok('y no deja ir antes del primer día con comidas', await p.locator('.sheet [data-x="ant"]').isDisabled());
+  await p.locator('.sheet [data-x="sig"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet [data-x="a"]').click(); await p.waitForTimeout(100);
+  ok('se puede agregar algo a un día pasado', /Agregar al mar 13 oct/.test(await p.locator('.sheet h3').innerText()));
+  await p.locator('#cNombre').fill('1 mandarina'); await p.locator('#cTipo').selectOption('colacion'); await p.locator('#cKcal').fill('48');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  s = await S();
+  const m13 = s.comidas['2026-10-13'][4];
+  ok('queda en ese día, sin hora y como colación, y vuelve al día', m13.nombre === '1 mandarina' && m13.tipo === 'colacion' && m13.hora === undefined
+    && await p.locator('.sheet .comida').count() === 5);
+  await p.locator('.sheet [data-act="ceditar"]').first().click(); await p.waitForTimeout(100);
+  ok('desde el historial también se edita', (await p.locator('#eNombre').inputValue()) === 'Café');
+  await p.locator('.sheet [data-x="b"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('y se borra, volviendo al día', (await S()).comidas['2026-10-13'].length === 4 && await p.locator('.sheet .comida').count() === 4);
+  await p.locator('.sheet [data-x="c"]').click(); await p.waitForTimeout(100);
+  // Aviso de las 22
+  await ctx.clock.setFixedTime(new Date(HOY_FIJO + 'T22:30:00'));
+  await ir(p, 'hoy');
+  ok('a las 22:30 Hoy avisa que falta la cena', /Falta cargar la cena\./.test(await p.locator('.alerta-comidas').innerText()));
+  await p.locator('.alerta-comidas [data-act="irComida"]').click(); await p.waitForTimeout(100);
+  ok('y lleva a Comida, que también lo muestra', await p.locator('nav button[data-tab="comida"][aria-current="true"]').count() === 1
+    && await p.locator('.alerta-comidas').count() === 1);
+  await p.locator('[data-act="cmano"]').click();
+  ok('a esa hora propone cena', (await p.locator('#cTipo').inputValue()) === 'cena');
+  await p.locator('#cNombre').fill('Pollo con ensalada'); await p.locator('#cKcal').fill('500'); await p.locator('#cProt').fill('45');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('con la cena cargada, la alerta se va', await p.locator('.alerta-comidas').count() === 0);
+  await p.locator('[data-act="caviso"]').click(); await p.locator('#aHora').fill('23:00'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('la hora del aviso se cambia', (await S()).settings.avisoComidas === '23:00' && /23:00/.test(await p.locator('.pie').first().innerText()));
+  await p.locator('[data-act="caviso"]').click(); await p.locator('.sheet [data-x="n"]').click(); await p.waitForTimeout(100);
+  ok('y se puede apagar', (await S()).settings.avisoComidas === 'no' && /Sin aviso de comidas/.test(await p.locator('.pie').first().innerText()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{}, { comidas: { '2026-10-14': [{ nombre: 'x', kcal: 1, prot: 0, tipo: 'brunch' }] } }, { frecuentes: [{ nombre: 'x', kcal: 1, prot: 0 }] }, { frecuentes: {} }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae tipos y frecuentes, y rechaza los rotos (' + resp + ')', resp === 'ok,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await ctx.close();
+
+  // En la app: el aviso de las 22 va como notificación del celular
+  const c2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c2.clock.setFixedTime(new Date(HOY_FIJO + 'T15:00:00'));
+  await c2.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify({ ...st, frecuentes: [] }));
+  await c2.addInitScript(() => {
+    window.__llamadas = [];
+    window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android',
+      nativePromise: async (plugin, metodo, op = {}) => {
+        window.__llamadas.push({ plugin, metodo, op: JSON.parse(JSON.stringify(op)) });
+        if (metodo === 'checkPermissions') return { display: 'granted' };
+        if (metodo === 'getPending') return { notifications: [] };
+        if (metodo === 'isHealthAvailable') return { available: false };
+        return {};
+      } };
+  });
+  const p2 = await c2.newPage(); p2.setDefaultTimeout(5000);
+  const errs2 = []; p2.on('pageerror', e => errs2.push(String(e)));
+  await p2.goto(URL); await p2.waitForTimeout(1200);
+  const ll = await p2.evaluate(() => window.__llamadas);
+  const ag = ll.filter(l => l.metodo === 'schedule').at(-1)?.op.notifications || [];
+  const hoy22 = ag.find(n => n.id === 500000);
+  ok('en la app programa el aviso de hoy a las 22 con lo que falta, en el canal "Comidas"', hoy22?.title === 'Falta cargar la merienda y la cena'
+    && hoy22.channelId === 'comidas' && hoy22.schedule.at === await p2.evaluate(() => new Date(2026, 9, 14, 22, 0).toISOString())
+    && ll.some(l => l.metodo === 'createChannel' && l.op.id === 'comidas'));
+  ok('y uno por día para las dos semanas que vienen', ag.filter(n => n.channelId === 'comidas').length === 14);
+  ok('sin errores de página: ' + JSON.stringify(errs2), errs2.length === 0);
+  await c2.close();
+}
+
+console.log('\n== 34. Hábitos con meta: sí o no ==');
+{
+  const st = estado({ habits: [{ id: 'hE', name: 'Ejercicio', order: 0, hora: '19:00', goal: { unidad: 'series', piso: 5, meta: 9, sube: 3, tope: 21, desde: '2026-09-28' } },
+                               { id: 'hC', name: 'Caminar seguido', order: 1, goal: { unidad: 'min', piso: 6, meta: 10, sube: 5, tope: 45, desde: '2026-09-28' }, auto: { source: 'steps', threshold: 6000, near: 0.9 } }] });
+  const { p, c: ctx, errs } = await abrirEn(HOY_FIJO, st);
+  ok('con meta, Hoy muestra las series', /9 series/.test(await p.locator('.hrow', { hasText: 'Ejercicio' }).innerText()));
+  await ir(p, 'mas');
+  await p.locator('[data-act="editH"][data-h="hE"]').click(); await p.waitForTimeout(100);
+  ok('Editar hábito ofrece medir con meta, tildado', await p.locator('#eg').isChecked() && /9 series/.test(await p.locator('.sheet').innerText()));
+  await p.locator('#eg').uncheck(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  let h = (await p.evaluate(() => window.__prime.S)).habits[0];
+  ok('destildado, pasa a sí o no y la meta queda guardada', !h.goal && h.metaGuardada?.meta === 9);
+  await ir(p, 'hoy');
+  ok('y en Hoy ya no pide series', !/series/.test(await p.locator('.hrow', { hasText: 'Ejercicio' }).innerText()));
+  await ir(p, 'mas');
+  await p.locator('[data-act="editH"][data-h="hE"]').click(); await p.waitForTimeout(100);
+  await p.locator('#eg').check(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  h = (await p.evaluate(() => window.__prime.S)).habits[0];
+  ok('volver a tildarlo recupera la meta', h.goal?.meta === 9 && !h.metaGuardada);
+  await p.locator('[data-act="editH"][data-h="hC"]').click(); await p.waitForTimeout(100);
+  ok('el de pasos no ofrece la opción (se mide en pasos)', await p.locator('#eg').count() === 0);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await ctx.close();
+}
+
+console.log('\n== 35. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

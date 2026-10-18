@@ -176,6 +176,19 @@ queda solo en el teléfono y **no viaja en el respaldo**. Los últimos 7 días s
 ven en una tabla (verde: dentro de la meta o proteína alcanzada; amarillo: te
 pasaste de calorías).
 
+Cada comida es **desayuno, almuerzo, merienda, cena o colación**: se propone
+por la hora (hasta las 11 desayuno, hasta las 16:30 almuerzo, hasta las 20:30
+merienda, después cena) y se puede cambiar. Tocando una comida se edita (nombre,
+tipo, hora, calorías, proteína) o se borra. Con *Guardar en frecuentes* queda
+en **Frecuentes**: las del tipo que toca a esa hora aparecen arriba y se cargan
+con un toque. La tabla de los últimos 7 días se toca para ver **qué se comió
+cada día**, con ‹ › para ir y volver, y para agregar algo a un día pasado.
+
+**Aviso de comidas:** a las 22:00 (se cambia o se apaga debajo de la lista de
+hoy), si falta alguna de las cuatro, la app de Android avisa cuáles faltan, y
+Hoy y Comida lo muestran desde esa hora. Se programa para los próximos 14 días
+y se reprograma con cada comida que se carga.
+
 El SDK de Anthropic va empaquetado en `vendor/anthropic-sdk.js` (se regenera
 con `npm run vendor` a partir de `ia-entrada.mjs`) y se carga recién al
 analizar la primera foto.
@@ -187,10 +200,12 @@ analizar la primera foto.
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
   amarillo y hoy no puede fallar (nunca en fin de semana ni feriado). Lo que
-  quedó sin marcar el último día hábil, para confirmarlo. **Reflexión de hoy**:
-  una frase por día, en rueda (la maldición de la disciplina, quedarse quieto
-  duele más que avanzar, "la calidad no es un acto, es un hábito"…); tocándola
-  se ven todas y cuántas veces marcaste verde desde que empezaste. Nota del día.
+  quedó sin marcar el último día hábil, para confirmarlo. **Reflexión**: una
+  frase a la mañana y otra distinta desde las 14, de un mazo de 16 sobre la
+  disciplina mezclado al azar, sin repetir hasta pasar por todas (la maldición
+  de la disciplina, quedarse quieto duele más que avanzar, "la calidad no es un
+  acto, es un hábito"…); tocándola se ven todas y cuántas veces marcaste verde
+  desde que empezaste. Nota del día.
 - **Mes** — la rueda de 31 días: un anillo por hábito del centro hacia afuera, un
   sector por día, el día de hoy con contorno, Prime % en el centro. Las celdas se
   tocan para cambiarlas.
@@ -198,7 +213,8 @@ analizar la primera foto.
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
 - **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
-- **Más** — hábitos (alta, edición, orden), listas *Hacer menos* y *Hacer más*,
+- **Más** — hábitos (alta, edición, orden; los que tienen meta de series o minutos
+  pueden pasar a sí o no y volver), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
 
 ---
@@ -215,7 +231,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                253 pruebas automatizadas (Playwright)
+├── test.mjs                297 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
