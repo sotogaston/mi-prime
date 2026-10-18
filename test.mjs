@@ -1253,6 +1253,16 @@ console.log('\n== 35. Cintura ==');
   const L = cargarLogica(estado());
   ok('95 cm con 164 de altura: cintura/altura 0,58; lo sano es menos de 82 cm', JSON.stringify(L.cinturaAltura(95, 164)) === '{"ratio":0.58,"sana":82}'
     && L.cinturaAltura(undefined, 164) === null);
+  const mc = L.metaCintura({ '2026-10-18': 95 }, 164, 0.5);
+  ok('meta de cintura: 82 cm, faltan 13; a 0,45 cm por semana llega el 9 de mayo, con una etapa en 90 cm el 10 de enero: ' + JSON.stringify(mc),
+    mc.objetivo === 82 && mc.faltan === 13 && !mc.medido && mc.porSemana === 0.45 && mc.fecha === '2027-05-09'
+    && mc.hito.cm === 90 && mc.hito.fecha === '2027-01-10');
+  const medida = L.metaCintura({ '2026-09-20': 97, '2026-10-18': 95 }, 164, 0.5);
+  ok('con dos semanas de medidas usa lo que viene bajando (0,5 cm por semana)', medida.medido && medida.porSemana === 0.5 && medida.fecha === '2027-04-18');
+  ok('si baja demasiado rápido no promete más de 0,75 cm por semana', L.metaCintura({ '2026-10-04': 97, '2026-10-18': 95 }, 164, 0.5).porSemana === 0.75);
+  ok('si no bajó, sigue con el ritmo de peso', L.metaCintura({ '2026-09-20': 95, '2026-10-18': 96 }, 164, 0.25).porSemana === 0.23
+    && !L.metaCintura({ '2026-09-20': 95, '2026-10-18': 96 }, 164, 0.25).medido);
+  ok('debajo de media altura ya llegó', L.metaCintura({ '2026-10-18': 81 }, 164, 0.5).llego === true && L.metaCintura({}, 164, 0.5) === null);
   ok('el cambio se cuenta desde la primera medida', JSON.stringify(L.cambioCintura({ '2026-10-21': 95.5, '2026-10-07': 97, '2026-10-14': 96 })) === '{"desde":"2026-10-07","cambio":-1.5}'
     && L.cambioCintura({ '2026-10-07': 97 }) === null && L.cambioCintura(undefined) === null);
 
@@ -1269,6 +1279,9 @@ console.log('\n== 35. Cintura ==');
   ok('se registra con el peso: 95 cm hoy', S.perfil.cintura === 95 && S.cinturas[HOY_FIJO] === 95 && S.pesos[HOY_FIJO] === 72.2);
   const linea = await p.locator('.cintura').innerText();
   ok('Tu meta muestra la cintura y la relación con la altura: ' + JSON.stringify(linea), /Cintura 95 cm/.test(linea) && /0,58/.test(linea) && /menos de 82 cm/.test(linea));
+  const meta = await p.locator('.meta-cintura').innerText();
+  ok('y la meta de cintura con fecha estimada: ' + JSON.stringify(meta), /Meta de cintura 82 cm · faltan 13 cm/.test(meta) && /mayo de 2027/.test(meta)
+    && /próxima etapa 90 cm ≈ 6 de enero/.test(meta) && /Estimado a 0,45 cm por semana por tu ritmo de peso/.test(meta));
   await p.locator('[data-act="cpeso"]').click();
   ok('la próxima vez muestra la última de referencia y arranca vacía', (await p.locator('#pCintura').getAttribute('placeholder')) === 'Última: 95'
     && (await p.locator('#pCintura').inputValue()) === '');

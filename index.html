@@ -915,6 +915,26 @@ function cambioCintura(cinturas){
   return { desde: d[0], cambio: Math.round((cinturas[d.at(-1)] - cinturas[d[0]]) * 10) / 10 };
 }
 
+/* Meta de cintura: media altura. Cuándo se llega sale de lo que viene bajando
+   (con al menos dos semanas entre la primera y la última medida) o, si todavía
+   no, del ritmo de peso: ~0,9 cm de cintura por kilo. Entre 0,15 y 0,75 cm por
+   semana para no prometer de más con el agua de las primeras semanas. Las
+   fechas se cuentan desde la última medida. */
+const HITOS_CINTURA = [0.55, 0.525];
+function metaCintura(cinturas, altura, ritmoKg){
+  const d = Object.keys(cinturas || {}).sort();
+  if(!d.length || !(altura > 0)) return null;
+  const actual = cinturas[d.at(-1)], objetivo = Math.floor(altura / 2);
+  if(actual <= objetivo) return { actual, objetivo, faltan: 0, llego: true };
+  const dias = (parseISO(d.at(-1)) - parseISO(d[0])) / 864e5, bajo = cinturas[d[0]] - actual;
+  const medido = dias >= 14 && bajo > 0;
+  const porSemana = Math.min(0.75, Math.max(0.15, medido ? bajo / (dias / 7) : (ritmoKg || 0.5) * 0.9));
+  const cuando = cm => iso(addDays(parseISO(d.at(-1)), Math.ceil((actual - cm) / porSemana) * 7));
+  const hito = HITOS_CINTURA.map(r => Math.round(altura * r)).find(cm => cm < actual && cm > objetivo);
+  return { actual, objetivo, faltan: Math.round((actual - objetivo) * 10) / 10, llego: false, medido,
+           porSemana: Math.round(porSemana * 100) / 100, fecha: cuando(objetivo), hito: hito ? { cm: hito, fecha: cuando(hito) } : null };
+}
+
 /* ---- tipo de comida ----
    Las cuatro del día más la colación, que no cuenta para el aviso. Si la
    comida no trae tipo (las viejas), sale de la hora: antes de las 11 desayuno,
@@ -1862,7 +1882,17 @@ function lineaCintura(p){
   return `<p class="cintura" style="margin:8px 0 0;font-size:14.5px;line-height:1.55">Cintura <b>${fmt1(p.cintura)} cm</b>${c?.cambio
       ? ` · ${c.cambio < 0 ? "−" : "+"}${fmt1(Math.abs(c.cambio))} cm desde el ${d.getDate()} de ${MESES[d.getMonth()]}` : ""}
     · cintura/altura <b>${r.ratio.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</b>${r.ratio < 0.5 ? " ✓"
-      : ` <span style="color:var(--muted)">(sana: menos de 0,5, o sea menos de ${r.sana} cm)</span>`}</p>`;
+      : ` <span style="color:var(--muted)">(sana: menos de 0,5, o sea menos de ${r.sana} cm)</span>`}</p>${lineaMetaCintura(p)}`;
+}
+function lineaMetaCintura(p){
+  const mc = metaCintura(S.cinturas, p.altura, p.ritmo);
+  if(!mc || mc.llego) return "";
+  const cmSemana = mc.porSemana.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+  const f = ds => parseISO(ds), mes = ds => `${MESES[f(ds).getMonth()]} de ${f(ds).getFullYear()}`, dia = ds => `${f(ds).getDate()} de ${MESES[f(ds).getMonth()]}`;
+  return `<p class="meta-cintura" style="margin:4px 0 0;font-size:14px;line-height:1.5">Meta de cintura <b>${mc.objetivo} cm</b> · faltan ${fmt1(mc.faltan)} cm
+      · ≈ ${mes(mc.fecha)}${mc.hito ? ` · próxima etapa ${mc.hito.cm} cm ≈ ${dia(mc.hito.fecha)}` : ""}<br>
+    <span style="color:var(--muted);font-size:12.5px">${mc.medido ? `A ${cmSemana} cm por semana, lo que venís bajando.`
+      : `Estimado a ${cmSemana} cm por semana por tu ritmo de peso; con dos semanas de medidas se ajusta a lo que bajes.`}</span></p>`;
 }
 function horaAhora(){ const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
 /* Hoy lleva la hora de ahora; un día pasado, la que se cargó (o ninguna) */
@@ -2796,7 +2826,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
   /* comida */ metasNutricion, totalComidas, normalizarAnalisis, claveIA,
   /* reflexión */ fraseDelDia, loQueSeCocina, REFLEXIONES,
-  /* cintura */ cinturaAltura, cambioCintura,
+  /* cintura */ cinturaAltura, cambioCintura, metaCintura,
   /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
