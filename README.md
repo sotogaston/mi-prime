@@ -159,7 +159,10 @@ actividad, en *Completar perfil*):
 
 Con 73,2 kg, 164 cm, 39 años, hombre, moderado y 0,5 kg por semana da unas
 **1.880 kcal y 130 g de proteína**, y faltan unas 7 semanas para los 70 kg.
-*Registrar peso* recalcula todo.
+*Registrar medidas* guarda el peso, que recalcula todo, y la cintura (opcional,
+una vez por semana alcanza): *Tu meta* muestra cuánto cambió desde la primera
+medida y la relación cintura/altura, que es sana por debajo de 0,5 (con 164 cm,
+menos de 82 cm de cintura).
 
 Lo que comés se carga de tres formas: **Sacar foto**, **Elegir foto** o
 **Agregar a mano**. La foto (achicada a 1024 px) va a **Claude Opus 5.5** con
@@ -231,7 +234,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                297 pruebas automatizadas (Playwright)
+├── test.mjs                308 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)

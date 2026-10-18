@@ -1248,7 +1248,47 @@ console.log('\n== 34. Hábitos con meta: sí o no ==');
   await ctx.close();
 }
 
-console.log('\n== 35. Capturas ==');
+console.log('\n== 35. Cintura ==');
+{
+  const L = cargarLogica(estado());
+  ok('95 cm con 164 de altura: cintura/altura 0,58; lo sano es menos de 82 cm', JSON.stringify(L.cinturaAltura(95, 164)) === '{"ratio":0.58,"sana":82}'
+    && L.cinturaAltura(undefined, 164) === null);
+  ok('el cambio se cuenta desde la primera medida', JSON.stringify(L.cambioCintura({ '2026-10-21': 95.5, '2026-10-07': 97, '2026-10-14': 96 })) === '{"desde":"2026-10-07","cambio":-1.5}'
+    && L.cambioCintura({ '2026-10-07': 97 }) === null && L.cambioCintura(undefined) === null);
+
+  const yo = { sexo: 'h', edad: 39, altura: 164, peso: 72.2, pesoMeta: 70, ritmo: 0.5, actividad: 1.55 };
+  const { p, c: ctx, errs } = await abrirEn(HOY_FIJO, { ...estado(), perfil: yo });
+  await ir(p, 'comida');
+  ok('sin cintura cargada, Tu meta no la muestra', await p.locator('.cintura').count() === 0
+    && /Registrar medidas/.test(await p.locator('[data-act="cpeso"]').innerText()));
+  await p.locator('[data-act="cpeso"]').click();
+  await p.locator('#pCintura').fill('20'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('una cintura rara no se guarda', await p.locator('.sheet #pCintura').count() === 1);
+  await p.locator('#pCintura').fill('95'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  let S = await p.evaluate(() => window.__prime.S);
+  ok('se registra con el peso: 95 cm hoy', S.perfil.cintura === 95 && S.cinturas[HOY_FIJO] === 95 && S.pesos[HOY_FIJO] === 72.2);
+  const linea = await p.locator('.cintura').innerText();
+  ok('Tu meta muestra la cintura y la relación con la altura: ' + JSON.stringify(linea), /Cintura 95 cm/.test(linea) && /0,58/.test(linea) && /menos de 82 cm/.test(linea));
+  await p.locator('[data-act="cpeso"]').click();
+  ok('la próxima vez muestra la última de referencia y arranca vacía', (await p.locator('#pCintura').getAttribute('placeholder')) === 'Última: 95'
+    && (await p.locator('#pCintura').inputValue()) === '');
+  await p.locator('#pPesoHoy').fill('72'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  S = await p.evaluate(() => window.__prime.S);
+  ok('si se deja vacía, solo cambia el peso', S.perfil.peso === 72 && S.perfil.cintura === 95 && Object.keys(S.cinturas).length === 1);
+  await p.evaluate(() => { const P = window.__prime; P.S.cinturas['2026-10-07'] = 97; P.save(); P.render(); });
+  ok('con una medida anterior, muestra cuánto bajó', /−2 cm desde el 7 de octubre/.test(await p.locator('.cintura').innerText()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{}, { cinturas: { '2026-10-14': -3 } }, { cinturas: { hoy: 90 } }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae las cinturas y rechaza las rotas (' + resp + ')', resp === 'ok,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await ctx.close();
+}
+
+console.log('\n== 36. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
