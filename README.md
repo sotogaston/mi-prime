@@ -168,7 +168,10 @@ peso (~0,9 cm por kilo) y, con dos semanas de medidas, de lo que viene bajando,
 entre 0,15 y 0,75 cm por semana.
 
 Lo que comés se carga de tres formas: **Sacar foto**, **Elegir foto** o
-**Agregar a mano**. La foto (achicada a 1024 px) va a **Claude Opus 5.5** con
+**Agregar a mano**. Se pueden mandar **hasta 4 fotos de la misma comida**
+(otro plato, otro ángulo, la etiqueta): la primera abre la hoja y desde ahí se
+suman las otras, de la cámara o de a varias desde la galería, y van juntas en
+un solo pedido. Las fotos (achicadas a 1024 px) van a **Claude Opus 5.5** con
 la API de Anthropic, que devuelve cada plato con su porción, calorías y
 proteína; antes de guardar se puede corregir cada número, y una aclaración
 ("era media porción", "sin aceite") cambia la estimación. La foto no se guarda.
@@ -237,7 +240,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                314 pruebas automatizadas (Playwright)
+├── test.mjs                320 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)

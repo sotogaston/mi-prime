@@ -981,6 +981,11 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   ok('"Sacar foto" abre la cámara (capture) y "Elegir foto" la galería', (await fc.element().getAttribute('capture')) === 'environment');
   await fc.setFiles({ name: 'plato.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
   await p.locator('#aclara').fill('la milanesa es de ternera');
+  ok('con una foto ofrece sumar hasta 3 más', await p.locator('.sheet .fotos img').count() === 1 && /hasta 3 fotos más/.test(await p.locator('.sheet').innerText()));
+  const [fcMas] = await Promise.all([p.waitForEvent('filechooser'), p.locator('.sheet [data-x="mg"]').click()]);
+  await fcMas.setFiles({ name: 'ensalada.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  ok('se suma la segunda y la aclaración no se pierde', await p.locator('.sheet .fotos img').count() === 2
+    && (await p.locator('#aclara').inputValue()) === 'la milanesa es de ternera' && /Analizar 2 fotos/.test(await p.locator('.sheet [data-x="o"]').innerText()));
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
   const q = pedidos.at(-1);
   ok('manda la foto a Claude Opus 5.5 con el SDK oficial, desde el celular y con tu clave', q && q.body.model === 'claude-opus-5-5' && q.headers['x-api-key'] === CLAVE
@@ -990,6 +995,8 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   const img = q?.body.messages[0].content.find(b => b.type === 'image'), txt = q?.body.messages[0].content.find(b => b.type === 'text');
   ok('la foto va como JPEG achicado, con tu aclaración y el prompt de nutricionista', img?.source.media_type === 'image/jpeg' && img.source.data.length > 50
     && /ternera/.test(txt?.text) && /nutricionista/.test(q.body.system));
+  ok('las dos fotos van juntas en un solo pedido, avisando que son de la misma comida', q.body.messages[0].content.filter(b => b.type === 'image').length === 2
+    && /Son 2 fotos de la misma comida/.test(txt?.text) && /no cuentes dos veces/.test(q.body.system));
   ok('muestra lo que vio Claude: 2 platos, 670 kcal, 40 g', await p.locator('.sheet .item input[data-k="kcal"]').count() === 2
     && /670 kcal · 40 g/.test(await p.locator('#totalIA').innerText()) && /aceite/.test(await p.locator('.sheet').innerText()));
   await p.locator('.sheet input[data-k="kcal"][data-i="1"]').fill('250');
@@ -1026,8 +1033,15 @@ console.log('\n== 31. Comida en la web: perfil, a mano y foto con Claude (simula
   // Errores claros
   respuesta = { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } } };
   const [fc2] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="cgaleria"]').click()]);
-  ok('"Elegir foto" no fuerza la cámara', (await fc2.element().getAttribute('capture')) === null);
-  await fc2.setFiles({ name: 'plato.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  ok('"Elegir foto" no fuerza la cámara y deja elegir varias', (await fc2.element().getAttribute('capture')) === null && fc2.isMultiple());
+  await fc2.setFiles(['a', 'b', 'c'].map(n => ({ name: n + '.png', mimeType: 'image/png', buffer: PNG }))); await p.waitForTimeout(400);
+  ok('elegidas de a varias entran juntas', await p.locator('.sheet .fotos img').count() === 3);
+  const [fc3] = await Promise.all([p.waitForEvent('filechooser'), p.locator('.sheet [data-x="mg"]').click()]);
+  await fc3.setFiles(['d', 'e'].map(n => ({ name: n + '.png', mimeType: 'image/png', buffer: PNG }))); await p.waitForTimeout(400);
+  ok('nunca más de 4: la quinta no entra y ya no ofrece sumar', await p.locator('.sheet .fotos img').count() === 4
+    && await p.locator('.sheet [data-x="mg"]').count() === 0 && /Hasta 4 fotos/.test(await p.locator('body').innerText()));
+  await p.locator('.sheet .fotos [data-q="3"]').click(); await p.waitForTimeout(100);
+  ok('una foto se puede sacar, y vuelve a ofrecer sumar', await p.locator('.sheet .fotos img').count() === 3 && await p.locator('.sheet [data-x="mg"]').count() === 1);
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1200);
   ok('si la clave no sirve, lo dice y deja reintentar', /La clave de Anthropic no es válida/.test(await p.locator('body').innerText())
     && (await p.locator('.sheet [data-x="o"]').innerText()) === 'Reintentar');
