@@ -233,8 +233,25 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in sr
 .mnav button:disabled{opacity:.3}
 .comida{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14.5px}
 .comida:last-child{border-bottom:none}
-.comida .hm{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;min-width:38px}
-.comida span.n{flex:1;min-width:0}
+.comida .hm{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;min-width:66px;line-height:1.25}
+.comida .hm small{display:block;font-size:11px}
+.comida .ce{display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-align:left;padding:0}
+.comida .pg{color:var(--muted);font-size:13px;white-space:nowrap}
+.frec{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:13px;margin-top:7px;text-align:left;background:var(--surface-2);font-size:14px}
+.frec span{flex:1;min-width:0}
+.frec b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.frec small{color:var(--muted);white-space:nowrap}
+.frec i{font-style:normal;font-weight:700;font-size:18px;color:var(--ok)}
+.frec-t{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:14px 0 0}
+.frow{display:flex;align-items:center;gap:6px}
+.frow .frec{flex:1}
+.frow .x{color:var(--muted);font-size:17px;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;margin-top:7px;flex:none}
+.chk{display:flex;align-items:center;gap:10px;font-size:14px;margin:12px 0 4px;cursor:pointer}
+.chk input{width:20px;height:20px;flex:none;margin:0;accent-color:var(--ok)}
+.detalle{font-size:12.5px;color:var(--muted);line-height:1.5;margin:10px 0 0}
+.pie{font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5}
+tr.tap{cursor:pointer}
+.comida span.n{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .comida b{font-variant-numeric:tabular-nums;white-space:nowrap}
 .comida .x{color:var(--muted);font-size:17px;width:32px;height:32px;border-radius:9px;display:grid;place-items:center}
 .sheet label.campo{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
@@ -308,6 +325,7 @@ function migrate(s){
   s.feriados ||= []; s.laborables ||= []; // feriados propios y feriados que se trabajan (ver esLibre)
   s.pasos ||= {};                          // pasos por día: Health Connect o el CSV de Samsung Health
   s.comidas ||= {}; s.pesos ||= {};        // comidas por día y peso por día (pestaña Comida)
+  s.frecuentes ||= [];                     // comidas que se repiten, para cargarlas con un toque
   s.settings.texture ??= false;
   s.habits.forEach((h,i)=>{ h.id ||= uid(); h.order ??= i; });
   return s;
@@ -868,7 +886,8 @@ function metasNutricion(p){
     semanas: bajar ? Math.ceil((p.peso - p.pesoMeta) / p.ritmo) : 0
   };
 }
-/* S.comidas = { "2026-10-12": [{ id, hora, nombre, kcal, prot, origen }] } */
+/* S.comidas = { "2026-10-12": [{ id, hora, nombre, kcal, prot, origen, tipo }] }
+   S.frecuentes = [{ id, tipo, nombre, kcal, prot }]: lo que se come seguido, a un toque */
 function totalComidas(lista){
   return (lista || []).reduce((t, c) => ({ kcal: t.kcal + (c.kcal || 0), prot: t.prot + (c.prot || 0) }), { kcal: 0, prot: 0 });
 }
@@ -879,6 +898,47 @@ function normalizarAnalisis(r){
     .map(i => ({ nombre: i.nombre.trim().slice(0, 60), porcion: String(i.porcion || "").slice(0, 60),
                  kcal: num(i.kcal, 5000), prot: num(i.proteina_g, 400) }));
   return { items, nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
+}
+
+/* ---- tipo de comida ----
+   Las cuatro del día más la colación, que no cuenta para el aviso. Si la
+   comida no trae tipo (las viejas), sale de la hora: antes de las 11 desayuno,
+   hasta las 16:30 almuerzo, hasta las 20:30 merienda, después cena. */
+const TIPOS_COMIDA = { desayuno: "Desayuno", almuerzo: "Almuerzo", merienda: "Merienda", cena: "Cena", colacion: "Colación" };
+const COMIDAS_DEL_DIA = ["desayuno", "almuerzo", "merienda", "cena"];
+function tipoPorHora(hora){
+  if(!esHora(hora)) return null;
+  const m = minutos(hora);
+  return m < 300 ? "cena" : m < 660 ? "desayuno" : m < 990 ? "almuerzo" : m < 1230 ? "merienda" : "cena";
+}
+function tipoDe(c){ return TIPOS_COMIDA[c?.tipo] ? c.tipo : tipoPorHora(c?.hora) || "colacion"; }
+function faltanComidas(lista){
+  const hay = new Set((lista || []).map(tipoDe));
+  return COMIDAS_DEL_DIA.filter(t => !hay.has(t));
+}
+/* "el desayuno", "la merienda y la cena" */
+function nombresComidas(tipos){
+  const art = t => (t === "merienda" || t === "cena" ? "la " : "el ") + TIPOS_COMIDA[t].toLowerCase();
+  const l = tipos.map(art);
+  return l.length > 1 ? l.slice(0, -1).join(", ") + " y " + l.at(-1) : l[0] || "";
+}
+/* Aviso de comidas: a la hora elegida, cada día de los próximos `dias`, si falta
+   alguna de las cuatro. Hoy dice cuáles; los días que vienen todavía no tienen
+   nada cargado, y al abrir la app ese día se reprograma con lo que falte. */
+function planAvisoComidas(comidas, ahora, dias, hora){
+  if(!esHora(hora)) return [];
+  const [hh, mm] = hora.split(":").map(Number), out = [];
+  for(let i = 0; i < dias; i++){
+    const d = addDays(ahora, i), ds = iso(d);
+    const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm);
+    if(at <= ahora) continue;
+    const faltan = faltanComidas(comidas?.[ds]);
+    if(!faltan.length) continue;
+    out.push({ id: 500000 + i, at, canal: "comidas",
+               title: faltan.length === COMIDAS_DEL_DIA.length ? "No cargaste ninguna comida hoy" : "Falta cargar " + nombresComidas(faltan),
+               body: "Tocá para ver qué pasó" });
+  }
+  return out;
 }
 
 /* ---- horarios ----
@@ -1022,11 +1082,43 @@ const REFLEXIONES = [
   { t: "Llega un momento en que quedarte en el mismo lugar duele más que avanzar.", de: "" },
   { t: "Somos lo que hacemos todos los días. La calidad no es un acto, es un hábito.", de: "Aristóteles, en palabras de Will Durant" },
   { t: "“Estás joven, disfrutá”, “después lo hacés”: la tentación siempre suena razonable. Hoy también se le dice que no.", de: "@serudda" },
-  { t: "Memento mori: el tiempo se termina. No lo gastes esperando tener ganas.", de: "" }
+  { t: "Memento mori: el tiempo se termina. No lo gastes esperando tener ganas.", de: "" },
+  { t: "La motivación te hace arrancar; el hábito te hace volver mañana.", de: "" },
+  { t: "No esperes tener ganas: empezá, y las ganas llegan después.", de: "" },
+  { t: "Cada promesa que te cumplís te hace creerte un poco más.", de: "" },
+  { t: "Un mal día no rompe nada. Lo que rompe es el segundo seguido.", de: "" },
+  { t: "Lo fácil de hoy se paga mañana; lo difícil de hoy se cobra mañana.", de: "" },
+  { t: "A las 7 de la mañana no se negocia: primero te levantás, después pensás.", de: "" },
+  { t: "Si no da para todo, hacé la versión chica. Cinco minutos cuentan; cero, no.", de: "" },
+  { t: "El cuerpo que querés se construye en los días aburridos, no en los épicos.", de: "" },
+  { t: "¿Hasta cuándo vas a esperar para exigirte lo mejor de vos?", de: "Epicteto" },
+  { t: "La racha no es un número: es la prueba de quién estás eligiendo ser.", de: "" }
 ];
-function fraseDelDia(fecha){
-  const n = Math.round(parseISO(fecha).getTime() / 864e5), k = REFLEXIONES.length;
-  return REFLEXIONES[((n % k) + k) % k];
+/* Dos frases por día, una a la mañana y otra a la tarde, sacadas de un mazo
+   mezclado: no se repite ninguna hasta pasar por todas (8 días con 16), y al
+   volver a mezclar la primera nunca es la última del mazo anterior. Sale de la
+   fecha, así que no hay nada que guardar y es la misma en todos lados. */
+function mezcla(n, semilla){
+  let a = semilla >>> 0;
+  const azar = () => {                       // mulberry32
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const p = [...Array(n).keys()];
+  for(let i = n - 1; i > 0; i--){ const j = Math.floor(azar() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+  return p;
+}
+function mazo(ciclo, n){
+  const p = mezcla(n, Math.imul(ciclo, 2654435761) + 12345);
+  if(n > 1 && p[0] === mezcla(n, Math.imul(ciclo - 1, 2654435761) + 12345)[n - 1]) [p[0], p[1]] = [p[1], p[0]];
+  return p;
+}
+function fraseDelDia(fecha, tarde = false){
+  const k = REFLEXIONES.length, turno = Math.round(parseISO(fecha).getTime() / 864e5) * 2 + (tarde ? 1 : 0);
+  const ciclo = Math.floor(turno / k), pos = turno - ciclo * k;
+  return REFLEXIONES[mazo(ciclo, k)[pos]];
 }
 /* Lo que se está cocinando: todas las marcas en verde y desde cuándo */
 function loQueSeCocina(S){
@@ -1273,6 +1365,7 @@ function vHoy(){
       ? "¿Te toca trabajar? Tomalo como día hábil" : "¿Hoy es feriado? Tomalo como día libre"}</button>`}
   </div>
   ${alert}
+  ${alertaComidasHTML()}
   ${pendHTML}
   ${avisosHTML()}
   ${reflexionHTML()}
@@ -1297,20 +1390,23 @@ function vHoy(){
 }
 
 /* Reflexión de hoy: una frase por día; tocándola se ven todas y lo acumulado */
+/* A la mañana una, desde las 14 otra */
+const esTarde = () => new Date().getHours() >= 14;
 function reflexionHTML(){
-  const f = fraseDelDia(TODAY);
+  const tarde = esTarde(), f = fraseDelDia(TODAY, tarde);
   return `<button class="card reflex" data-act="reflexion">
-    <div class="card-t">Reflexión de hoy</div>
+    <div class="card-t">Reflexión de la ${tarde ? "tarde" : "mañana"}</div>
     <p class="frase">${esc(f.t)}</p>${f.de ? `<small>— ${esc(f.de)}</small>` : ""}
     <span class="ver">Ver todas</span></button>`;
 }
 function verReflexion(){
-  const c = loQueSeCocina(S), hoy = fraseDelDia(TODAY), d = c.desde && parseISO(c.desde);
+  const c = loQueSeCocina(S), manana = fraseDelDia(TODAY), tarde = fraseDelDia(TODAY, true), d = c.desde && parseISO(c.desde);
   const desde = d ? `${d.getDate()} de ${MESES[d.getMonth()]}${d.getFullYear() !== parseISO(TODAY).getFullYear() ? " de " + d.getFullYear() : ""}` : "";
   sheet(`<h3>Reflexión</h3>
     ${c.verdes ? `<div class="cocina">Lo que se está cocinando: <b>${fmt(c.verdes)} ${c.verdes === 1 ? "vez" : "veces"} en verde</b> desde el ${desde}.
       De un día para el otro no se nota; sumado, sí.</div>` : `<p class="sub">Cada verde suma, aunque hoy no se note.</p>`}
-    ${REFLEXIONES.map(f => `<blockquote${f === hoy ? ' class="hoy"' : ""}>${esc(f.t)}${f.de ? `<small>— ${esc(f.de)}</small>` : ""}</blockquote>`).join("")}
+    ${REFLEXIONES.map(f => `<blockquote${f === manana || f === tarde ? ' class="hoy"' : ""}>${esc(f.t)}${f.de ? `<small>— ${esc(f.de)}</small>` : ""}${
+      f === manana ? "<small>Hoy a la mañana</small>" : f === tarde ? "<small>Hoy a la tarde</small>" : ""}</blockquote>`).join("")}
     <button class="btn" data-x="c">Seguir</button>`);
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
 }
@@ -1574,25 +1670,29 @@ function vComida(){
       <p style="margin:14px 0 0;font-size:14.5px"><b>${fmt(t.prot)} g</b> de ${fmt(m.prot)} g de proteína${t.prot >= m.prot ? " ✓" : ` · faltan ${fmt(m.prot - t.prot)} g`}</p>
       ${barra(t.prot, m.prot, t.prot >= m.prot ? "var(--ok)" : "var(--muted)")}</div>`;
   })() : "";
+  const frecs = S.frecuentes || [], tipoAhora = tipoPorHora(horaAhora()), deAhora = frecs.filter(f => f.tipo === tipoAhora);
   const acciones = `<div class="card"><div class="card-t">Cargar lo que comés</div>
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <button class="btn" data-act="cfoto" style="margin:0">Sacar foto</button>
       <button class="btn ghost" data-act="cgaleria" style="margin:0">Elegir foto</button></div>
-    <button class="btn ghost" data-act="cmano">Agregar a mano</button>
+    ${deAhora.length ? `<p class="frec-t">${TIPOS_COMIDA[tipoAhora]} frecuente</p>${deAhora.map(filaFrecuente).join("")}` : ""}
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:9px">
+      <button class="btn ghost" data-act="cmano" style="margin:0">Agregar a mano</button>
+      <button class="btn ghost" data-act="cfrecs" style="margin:0">Frecuentes${frecs.length ? ` (${frecs.length})` : ""}</button></div>
     ${conClave ? "" : `<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">Para que Claude calcule desde una foto o desde lo que escribís, falta cargar tu clave de Anthropic (abajo, en “Calorías con Claude”).</p>`}</div>`;
-  const lista = `<div class="card"><div class="card-t">Hoy</div>${hoy.length ? hoy.map((c, i) => `<div class="comida">
-      <span class="hm">${esc(c.hora || "")}</span><span class="n">${esc(c.nombre)}</span>
-      <b>${fmt(c.kcal)} kcal</b><span style="color:var(--muted);font-size:13px;white-space:nowrap">${fmt(c.prot)} g</span>
-      <button class="x" data-act="cborrar" data-i="${i}" aria-label="Borrar ${esc(c.nombre)}">✕</button></div>`).join("")
-    : `<p style="margin:0;color:var(--muted);font-size:13.5px">Todavía no cargaste nada hoy.</p>`}</div>`;
+  const hora = avisoComidasHora();
+  const lista = `<div class="card"><div class="card-t">Hoy</div>${hoy.length ? ordenComidas(hoy).map(([c, i]) => filaComida(c, i, TODAY)).join("")
+    : `<p style="margin:0;color:var(--muted);font-size:13.5px">Todavía no cargaste nada hoy.</p>`}
+    <p class="pie">${hora ? `${NATIVO ? "A las" : "Desde las"} ${hora} te avisa si falta alguna de las cuatro comidas.` : "Sin aviso de comidas."}
+      <button class="linkbtn" data-act="caviso">Cambiar</button></p></div>`;
   const dias = Array.from({ length: 7 }, (_, i) => iso(addDays(parseISO(TODAY), -i)));
   const semana = m ? `<div class="card"><div class="card-t">Últimos 7 días</div><table class="tbl">
       <tr><th>Día</th><th>Calorías</th><th>Proteína</th></tr>
       ${dias.map(d => { const x = totalComidas(S.comidas?.[d]); const vacio = !(S.comidas?.[d] || []).length;
-        return `<tr${d === TODAY ? ' class="tr-today"' : ""}><td>${cap(fechaCorta(d))}</td>
+        return `<tr class="tap${d === TODAY ? " tr-today" : ""}" data-act="cdia" data-d="${d}"><td>${cap(fechaCorta(d))}</td>
           <td class="${vacio ? "n" : x.kcal <= m.kcal ? "g" : "y"}">${vacio ? "—" : fmt(x.kcal)}</td>
           <td class="${vacio ? "n" : x.prot >= m.prot ? "g" : ""}">${vacio ? "—" : fmt(x.prot) + " g"}</td></tr>`; }).join("")}
-      </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Verde: calorías dentro de la meta o proteína alcanzada. Amarillo: te pasaste de calorías.</p></div>` : "";
+      </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Tocá un día para ver qué comiste. Verde: calorías dentro de la meta o proteína alcanzada. Amarillo: te pasaste de calorías.</p></div>` : "";
   const cuerpo = m ? `<div class="card"><div class="card-t">Tu meta</div>
       <p style="margin:0;font-size:14.5px;line-height:1.55"><b>${fmt1(p.peso)} kg</b> → ${fmt1(p.pesoMeta)} kg
         ${m.faltan ? `· faltan ${fmt1(m.faltan)} kg (≈ ${m.semanas} ${m.semanas === 1 ? "semana" : "semanas"} a ${fmt1(p.ritmo)} kg por semana)` : "· ¡llegaste! La meta es mantener"}</p>
@@ -1605,14 +1705,150 @@ function vComida(){
       Cuesta unos 2 a 3 centavos de dólar cada vez (algo menos con texto) y se cobra en tu cuenta de Anthropic.</p>
     <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
     <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>`;
-  return perfil + resumen + acciones + lista + semana + cuerpo + ia;
+  return alertaComidasHTML() + perfil + resumen + acciones + lista + semana + cuerpo + ia;
+}
+/* Una comida en una lista: tocándola se edita; la ✕ la borra */
+function filaComida(c, i, fecha){
+  return `<div class="comida">
+      <button class="ce" data-act="ceditar" data-d="${fecha}" data-i="${i}" aria-label="Editar ${esc(c.nombre)}">
+        <span class="hm">${TIPOS_COMIDA[tipoDe(c)]}${c.hora ? `<small>${esc(c.hora)}</small>` : ""}</span>
+        <span class="n">${esc(c.nombre)}</span><b>${fmt(c.kcal)} kcal</b><span class="pg">${fmt(c.prot)} g</span></button>
+      <button class="x" data-act="cborrar" data-d="${fecha}" data-i="${i}" aria-label="Borrar ${esc(c.nombre)}">✕</button></div>`;
+}
+/* En orden del día; las que no tienen hora van donde suele ir su comida */
+const HORA_TIPO = { desayuno: "08:00", almuerzo: "13:00", merienda: "18:00", cena: "21:30", colacion: "23:59" };
+function ordenComidas(lista){
+  return (lista || []).map((c, i) => [c, i]).sort(([a], [b]) => (a.hora || HORA_TIPO[tipoDe(a)]).localeCompare(b.hora || HORA_TIPO[tipoDe(b)]));
+}
+function filaFrecuente(f){
+  return `<button class="frec" data-act="cfrec" data-id="${f.id}" aria-label="Agregar ${esc(f.nombre)}">
+    <span>${esc(f.nombre)}</span><b>${fmt(f.kcal)} kcal</b><small>${fmt(f.prot)} g</small><i>+</i></button>`;
+}
+function selectTipo(id, valor){
+  return `<select id="${id}">${Object.entries(TIPOS_COMIDA).map(([k, t]) => `<option value="${k}"${k === valor ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+}
+
+/* ---- aviso de comidas: a las 22 (o la hora elegida), si falta alguna de las cuatro ---- */
+function avisoComidasHora(){ const v = S.settings.avisoComidas; return v === "no" ? null : esHora(v) ? v : "22:00"; }
+function usaComidas(){ return !!S.perfil || Object.keys(S.comidas || {}).length > 0; }
+function alertaComidasHTML(){
+  const hora = avisoComidasHora(), d = new Date();
+  if(!hora || !usaComidas() || d.getHours() * 60 + d.getMinutes() < minutos(hora)) return "";
+  const faltan = faltanComidas(S.comidas?.[TODAY]);
+  if(!faltan.length) return "";
+  return `<div class="alert risk alerta-comidas"><span class="ic">🍽</span><div><b>${faltan.length === COMIDAS_DEL_DIA.length
+    ? "No cargaste ninguna comida hoy." : cap(`falta cargar ${nombresComidas(faltan)}.`)}</b> ¿Qué pasó?
+    ${TAB === "comida" ? "" : `<br><button class="linkbtn" data-act="irComida">Ir a Comida</button>`}</div></div>`;
+}
+function editarAvisoComidas(){
+  sheet(`<h3>Aviso de comidas</h3><p class="sub">A esta hora te avisa si falta cargar el desayuno, el almuerzo, la merienda o la cena.</p>
+    <input type="time" id="aHora" value="${avisoComidasHora() || "22:00"}" aria-label="Hora del aviso">
+    <div class="row2"><button class="btn ghost" data-x="n">Sin aviso</button><button class="btn" data-x="o">Guardar</button></div>`);
+  modal.querySelector('[data-x="n"]').onclick = () => { S.settings.avisoComidas = "no"; save(); closeSheet(); render(); toast("Aviso de comidas apagado"); };
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const v = modal.querySelector("#aHora").value;
+    if(!esHora(v)){ toast("Escribí la hora como 22:00"); return; }
+    S.settings.avisoComidas = v; save(); closeSheet(); render(); toast(`Aviso de comidas a las ${v}`);
+  };
+}
+
+/* ---- frecuentes: se guardan por tipo y nombre ---- */
+const normNombre = t => String(t).trim().toLowerCase().replace(/\s+/g, " ");
+function buscarFrecuente(tipo, nombre){ return (S.frecuentes || []).find(f => f.tipo === tipo && normNombre(f.nombre) === normNombre(nombre)); }
+function guardarFrecuente({ tipo, nombre, kcal, prot }){
+  const f = buscarFrecuente(tipo, nombre);
+  if(f) Object.assign(f, { nombre: nombre.slice(0, 80), kcal, prot });
+  else (S.frecuentes ||= []).push({ id: uid(), tipo, nombre: nombre.slice(0, 80), kcal, prot });
+}
+function sacarFrecuente(tipo, nombre){
+  S.frecuentes = (S.frecuentes || []).filter(f => !(f.tipo === tipo && normNombre(f.nombre) === normNombre(nombre)));
+}
+function agregarFrecuente(id){
+  const f = (S.frecuentes || []).find(x => x.id === id); if(!f) return;
+  closeSheet();
+  guardarComida({ nombre: f.nombre, kcal: f.kcal, prot: f.prot, tipo: f.tipo, origen: "frecuente" });
+}
+function verFrecuentes(){
+  const frecs = S.frecuentes || [];
+  sheet(`<h3>Frecuentes</h3><p class="sub">${frecs.length ? "Tocá una para sumarla hoy." : "Todavía no hay."} Para agregar una, tocá una comida que ya cargaste y tildá «Guardar en frecuentes».</p>
+    ${Object.keys(TIPOS_COMIDA).filter(t => frecs.some(f => f.tipo === t)).map(t => `<p class="frec-t">${TIPOS_COMIDA[t]}</p>
+      ${frecs.filter(f => f.tipo === t).map(f => `<div class="frow">${filaFrecuente(f)}<button class="x" data-q="${f.id}" aria-label="Sacar ${esc(f.nombre)} de frecuentes">✕</button></div>`).join("")}`).join("")}
+    <button class="btn ghost" data-x="c">Cerrar</button>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelectorAll('[data-act="cfrec"]').forEach(b => b.onclick = () => agregarFrecuente(b.dataset.id));
+  modal.querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
+    S.frecuentes = frecs.filter(f => f.id !== b.dataset.q); save(); render(); verFrecuentes(); toast("Sacada de frecuentes");
+  });
+}
+
+/* ---- editar, borrar e historial ---- */
+function borrarComida(fecha, i){
+  const l = S.comidas?.[fecha]; if(!l?.[i]) return;
+  l.splice(i, 1);
+  if(!l.length) delete S.comidas[fecha];
+  save();
+}
+function confirmarBorrado(fecha, i, volver){
+  const c = S.comidas?.[fecha]?.[i]; if(!c) return;
+  confirmSheet("¿Borrar esta comida?", `${c.nombre} · ${fmt(c.kcal)} kcal`, "Borrar", () => { borrarComida(fecha, i); render(); volver?.(); });
+}
+function editarComida(fecha, i, volver){
+  const c = S.comidas?.[fecha]?.[i]; if(!c) return;
+  const tipo = tipoDe(c), eraFrec = !!buscarFrecuente(tipo, c.nombre);
+  sheet(`<h3>Editar comida</h3><p class="sub">${cap(fechaCorta(fecha))}${c.origen === "foto" ? " · calculada desde una foto" : c.origen === "texto" ? " · calculada por Claude" : ""}</p>
+    <label class="campo">Qué comiste</label><input type="text" id="eNombre" maxlength="120" value="${esc(c.nombre)}">
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo">Comida</label>${selectTipo("eTipo", tipo)}</div>
+      <div><label class="campo">Hora</label><input type="time" id="eHora" value="${esc(c.hora || "")}"></div>
+      <div><label class="campo">Calorías (kcal)</label><input type="number" id="eKcal" inputmode="numeric" min="0" max="5000" value="${c.kcal}"></div>
+      <div><label class="campo">Proteína (g)</label><input type="number" id="eProt" inputmode="numeric" min="0" max="400" value="${c.prot}"></div></div>
+    ${c.detalle?.length ? `<p class="detalle">${c.detalle.map(d => `${esc(d.nombre)} · ${fmt(d.kcal)} kcal · ${fmt(d.prot)} g`).join("<br>")}</p>` : ""}
+    <label class="chk"><input type="checkbox" id="eFrec"${eraFrec ? " checked" : ""}> Guardar en frecuentes</label>
+    <div class="row2"><button class="btn ghost danger" data-x="b">Borrar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $('[data-x="b"]').onclick = () => confirmarBorrado(fecha, i, volver);
+  $('[data-x="o"]').onclick = () => {
+    const nombre = $("#eNombre").value.trim(), nuevoTipo = $("#eTipo").value, hora = $("#eHora").value,
+          kcal = Math.round(Number($("#eKcal").value)), prot = Math.round(Number($("#eProt").value) || 0);
+    if(!nombre || $("#eKcal").value === "" || !(kcal >= 0 && kcal <= 5000) || !(prot >= 0 && prot <= 400)){ toast("Poné qué comiste y las calorías"); return; }
+    if(hora && !esHora(hora)){ toast("Escribí la hora como 13:30"); return; }
+    if(eraFrec) sacarFrecuente(tipo, c.nombre);
+    if($("#eFrec").checked) guardarFrecuente({ tipo: nuevoTipo, nombre, kcal, prot });
+    Object.assign(c, { nombre: nombre.slice(0, 80), tipo: nuevoTipo, kcal, prot });
+    if(hora) c.hora = hora; else delete c.hora;
+    save(); closeSheet(); render(); volver?.();
+    toast("Comida actualizada");
+  };
+}
+/* Historial: un día por vez, con ‹ › para ir y volver */
+function verDia(fecha){
+  const lista = S.comidas?.[fecha] || [], t = totalComidas(lista), m = metasNutricion(S.perfil);
+  const primero = Object.keys(S.comidas || {}).sort()[0] || TODAY, faltan = faltanComidas(lista);
+  const mover = n => verDia(iso(addDays(parseISO(fecha), n)));
+  sheet(`<div class="mnav" style="box-shadow:none"><button data-x="ant" aria-label="Día anterior"${fecha <= primero ? " disabled" : ""}>‹</button>
+      <b>${fechaCorta(fecha)}</b><button data-x="sig" aria-label="Día siguiente"${fecha >= TODAY ? " disabled" : ""}>›</button></div>
+    <p class="sub">${lista.length ? `<b>${fmt(t.kcal)} kcal</b>${m ? ` de ${fmt(m.kcal)}` : ""} · <b>${fmt(t.prot)} g</b>${m ? ` de ${fmt(m.prot)} g` : ""} de proteína`
+      : "Ese día no cargaste comidas."}</p>
+    ${ordenComidas(lista).map(([c, i]) => filaComida(c, i, fecha)).join("")}
+    ${lista.length && faltan.length ? `<p class="pie">Sin cargar: ${nombresComidas(faltan)}.</p>` : ""}
+    <div class="row2"><button class="btn ghost" data-x="c">Cerrar</button><button class="btn" data-x="a">Agregar a este día</button></div>`);
+  modal.querySelector('[data-x="ant"]').onclick = () => mover(-1);
+  modal.querySelector('[data-x="sig"]').onclick = () => mover(1);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="a"]').onclick = () => comidaAMano(fecha);
+  modal.querySelectorAll('[data-act="ceditar"]').forEach(b => b.onclick = () => editarComida(fecha, +b.dataset.i, () => verDia(fecha)));
+  modal.querySelectorAll('[data-act="cborrar"]').forEach(b => b.onclick = () => confirmarBorrado(fecha, +b.dataset.i, () => verDia(fecha)));
 }
 function fmt1(n){ return Number(n).toLocaleString("es-AR", { maximumFractionDigits: 1 }); }
 function horaAhora(){ const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
-function guardarComida(c){
-  (S.comidas ||= {})[TODAY] ||= [];
-  S.comidas[TODAY].push({ id: uid(), hora: horaAhora(), ...c });
+/* Hoy lleva la hora de ahora; un día pasado, la que se cargó (o ninguna) */
+function guardarComida(c, fecha = TODAY){
+  const hora = fecha === TODAY ? horaAhora() : (c.hora || "");
+  const nueva = { id: uid(), ...c, tipo: TIPOS_COMIDA[c.tipo] ? c.tipo : tipoPorHora(hora) || "colacion" };
+  if(hora) nueva.hora = hora; else delete nueva.hora;
+  ((S.comidas ||= {})[fecha] ||= []).push(nueva);
   save(); render();
+  if(fecha !== TODAY) verDia(fecha);
   toast(`${c.nombre}: ${fmt(c.kcal)} kcal · ${fmt(c.prot)} g de proteína`);
 }
 
@@ -1654,17 +1890,21 @@ function registrarPeso(){
     toast(`Peso ${fmt1(n)} kg · meta ${fmt(metasNutricion(S.perfil).kcal)} kcal`);
   };
 }
-/* Con clave y sin calorías, el botón es "Calcular": Claude estima a partir de lo escrito */
-function comidaAMano(){
+/* Con clave y sin calorías, el botón es "Calcular": Claude estima a partir de lo escrito.
+   Con fecha, carga en ese día (desde el historial). */
+function comidaAMano(fecha = TODAY){
   const conClave = !!claveIA();
-  sheet(`<h3>Agregar a mano</h3>
+  const tipo = fecha === TODAY ? tipoPorHora(horaAhora()) : faltanComidas(S.comidas?.[fecha])[0] || "colacion";
+  sheet(`<h3>${fecha === TODAY ? "Agregar a mano" : "Agregar al " + fechaCorta(fecha)}</h3>
     <label class="campo">Qué comiste</label><input type="text" id="cNombre" maxlength="120" placeholder="Ej.: 2 empanadas de carne">
+    <label class="campo">Comida</label>${selectTipo("cTipo", tipo)}
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo">Calorías (kcal)</label><input type="number" id="cKcal" inputmode="numeric" min="0" max="5000"></div>
       <div><label class="campo">Proteína (g)</label><input type="number" id="cProt" inputmode="numeric" min="0" max="400"></div></div>
     <p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;line-height:1.5">${conClave
       ? "¿No sabés las calorías? Dejalas vacías y las calcula Claude con lo que escribiste."
       : "Con tu clave de Anthropic (en “Calorías con Claude”), Claude las calcula si no las sabés."}</p>
+    <label class="chk"><input type="checkbox" id="cFrec"> Guardar en frecuentes</label>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
   const cNombre = modal.querySelector("#cNombre"), cKcal = modal.querySelector("#cKcal"), boton = modal.querySelector('[data-x="o"]');
   const calcula = () => conClave && cKcal.value.trim() === "";
@@ -1673,17 +1913,18 @@ function comidaAMano(){
   cNombre.focus();
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   boton.onclick = async () => {
-    const nombre = cNombre.value.trim();
+    const nombre = cNombre.value.trim(), tipoSel = modal.querySelector("#cTipo").value, frecuente = modal.querySelector("#cFrec").checked;
     if(calcula()){
       if(!nombre){ toast("Escribí qué comiste"); return; }
       boton.disabled = true; boton.textContent = "Calculando…";
-      try{ mostrarAnalisis(await analizarComida(null, nombre), { origen: "texto", nombre }); }
+      try{ mostrarAnalisis(await analizarComida(null, nombre), { origen: "texto", nombre, fecha, tipo: tipoSel, frecuente }); }
       catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
       return;
     }
     const kcal = Math.round(Number(cKcal.value)), prot = Math.round(Number(modal.querySelector("#cProt").value) || 0);
     if(!nombre || !(kcal >= 0 && kcal <= 5000) || !(prot >= 0 && prot <= 400)){ toast("Poné qué comiste y las calorías"); return; }
-    closeSheet(); guardarComida({ nombre: nombre.slice(0, 80), kcal, prot, origen: "mano" });
+    if(frecuente) guardarFrecuente({ tipo: tipoSel, nombre, kcal, prot });
+    closeSheet(); guardarComida({ nombre: nombre.slice(0, 80), kcal, prot, origen: "mano", tipo: tipoSel }, fecha);
   };
 }
 
@@ -1869,15 +2110,13 @@ function onAct(e){
     case "cfoto": elegirFoto(true); break;
     case "cgaleria": elegirFoto(false); break;
     case "cclave": editarClave(); break;
-    case "cborrar": {
-      const c = S.comidas?.[TODAY]?.[+el.dataset.i];
-      if(c) confirmSheet("¿Borrar esta comida?", `${c.nombre} · ${fmt(c.kcal)} kcal`, "Borrar", () => {
-        S.comidas[TODAY].splice(+el.dataset.i, 1);
-        if(!S.comidas[TODAY].length) delete S.comidas[TODAY];
-        save(); render();
-      });
-      break;
-    }
+    case "cborrar": confirmarBorrado(el.dataset.d || TODAY, +el.dataset.i); break;
+    case "ceditar": editarComida(el.dataset.d || TODAY, +el.dataset.i); break;
+    case "cdia": verDia(el.dataset.d); break;
+    case "cfrec": agregarFrecuente(el.dataset.id); break;
+    case "cfrecs": verFrecuentes(); break;
+    case "caviso": editarAvisoComidas(); break;
+    case "irComida": TAB = "comida"; render(); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -1960,11 +2199,14 @@ function addHabit(){
 /* Nombre y horario de lunes a viernes. El horario ordena Hoy y arma los recordatorios. */
 function editHabit(hid){
   const h = S.habits.find(x => x.id === hid); if(!h) return;
+  const meta = h.goal || h.metaGuardada, conMeta = !!meta && h.auto?.source !== "steps";
   sheet(`<h3>Editar hábito</h3>
     <input type="text" id="en" maxlength="42" value="${esc(h.name)}" aria-label="Nombre">
     <p class="sub" style="margin:12px 0 6px">Horario de lunes a viernes (opcional): desde y hasta.</p>
     <div class="row2"><input type="time" id="eh" value="${h.hora || ""}" aria-label="Desde">
       <input type="time" id="ef" value="${h.hasta || ""}" aria-label="Hasta"></div>
+    ${conMeta ? `<label class="chk"><input type="checkbox" id="eg"${h.goal ? " checked" : ""}> Medir con meta: ${meta.meta} ${esc(meta.unidad)}</label>
+      <p class="sub" style="margin:0 0 6px">Sin tildar, el hábito es sí o no. La meta queda guardada por si querés volver.</p>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c" style="margin:0">Cancelar</button>
     <button class="btn" data-x="o" style="margin:0">Guardar</button></div>`);
   const $ = id => modal.querySelector(id);
@@ -1976,6 +2218,11 @@ function editHabit(hid){
     if((hora && !esHora(hora)) || (hasta && !esHora(hasta))){ toast("Escribí la hora como 07:30"); return; }
     if(hasta && hasta === hora){ toast("El fin tiene que ser distinto del inicio"); return; }
     h.name = nombre;
+    if(conMeta){
+      const on = $("#eg").checked;
+      if(on && !h.goal){ h.goal = h.metaGuardada; delete h.metaGuardada; }
+      else if(!on && h.goal){ h.metaGuardada = h.goal; delete h.goal; }
+    }
     if(hora) h.hora = hora; else delete h.hora;
     if(hora && hasta) h.hasta = hasta; else delete h.hasta;
     closeSheet(); save(); render();
@@ -2058,8 +2305,11 @@ function prepararRespaldo(texto){
   if(data.pesos != null && !(esObj(data.pesos) && Object.entries(data.pesos).every(([d, n]) => esFecha(d) && esNum(n))))
     throw new Error(`El campo "pesos" está roto.`);
   if(data.comidas != null && !(esObj(data.comidas) && Object.entries(data.comidas).every(([d, l]) => esFecha(d) && Array.isArray(l)
-      && l.every(c => esObj(c) && typeof c.nombre === "string" && esNum(c.kcal) && esNum(c.prot)))))
+      && l.every(c => esObj(c) && typeof c.nombre === "string" && esNum(c.kcal) && esNum(c.prot) && (c.tipo == null || Object.hasOwn(TIPOS_COMIDA, c.tipo))))))
     throw new Error(`El campo "comidas" está roto.`);
+  if(data.frecuentes != null && !(Array.isArray(data.frecuentes) && data.frecuentes.every(f => esObj(f) && typeof f.nombre === "string"
+      && esNum(f.kcal) && esNum(f.prot) && Object.hasOwn(TIPOS_COMIDA, f.tipo))))
+    throw new Error(`El campo "frecuentes" está roto.`);
   if(data.perfil != null && !esObj(data.perfil)) throw new Error(`El campo "perfil" está roto.`);
   if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
     throw new Error(`El campo "autoClosed" está roto.`);
@@ -2248,12 +2498,16 @@ async function programarAvisos(){
     if(perm.display !== "granted"){ AVISOS_ESTADO = { error: "La app no tiene permiso para avisar: activalo en Ajustes → Apps → Mi Prime → Notificaciones." }; return mostrarAvisos(); }
     await nativo("LocalNotifications", "createChannel", { id: "habitos", name: "Hábitos", description: "Aviso a la hora de cada hábito",
                                                           importance: 4, visibility: 1, vibration: true });
+    await nativo("LocalNotifications", "createChannel", { id: "comidas", name: "Comidas", description: "Aviso si falta cargar alguna comida",
+                                                          importance: 4, visibility: 1, vibration: true });
     const { notifications: viejos = [] } = await nativo("LocalNotifications", "getPending");
     if(viejos.length) await nativo("LocalNotifications", "cancel", { notifications: viejos.map(n => ({ id: n.id })) });
     const hechos = new Set(S.habits.filter(h => getMark(TODAY, h.id)).map(h => h.id));
-    const plan = planAvisos(S.habits, new Date(), 14, hechos);
+    const ahora = new Date(), hora = avisoComidasHora();
+    const plan = [...planAvisos(S.habits, ahora, 14, hechos),
+                  ...(hora && usaComidas() ? planAvisoComidas(S.comidas, ahora, 14, hora) : [])].sort((a, b) => a.at - b.at);
     if(plan.length) await nativo("LocalNotifications", "schedule", { notifications: plan.map(a => ({
-      id: a.id, title: a.title, body: a.body, channelId: "habitos", autoCancel: true,
+      id: a.id, title: a.title, body: a.body, channelId: a.canal || "habitos", autoCancel: true,
       schedule: { at: a.at.toISOString(), allowWhileIdle: true } })) });
     AVISOS_ESTADO = { cantidad: plan.length, proximo: plan[0] || null };
   }catch(e){ AVISOS_ESTADO = { error: "No se pudieron programar los avisos: " + (e?.message || e) }; }
@@ -2473,7 +2727,7 @@ function mensajeErrorIA(e){
   }
   return "No se pudo calcular: probá de nuevo";
 }
-function mostrarAnalisis(r, { origen = "foto", nombre } = {}){
+function mostrarAnalisis(r, { origen = "foto", nombre, fecha = TODAY, tipo, frecuente = false } = {}){
   const filas = r.items.map((it, i) => `<div class="item"><span>${esc(it.nombre)}<small>${esc(it.porcion)}</small></span>
       <input type="number" data-k="kcal" data-i="${i}" inputmode="numeric" min="0" value="${it.kcal}" aria-label="Calorías de ${esc(it.nombre)}">
       <input type="number" data-k="prot" data-i="${i}" inputmode="numeric" min="0" value="${it.prot}" aria-label="Proteína de ${esc(it.nombre)}"></div>`).join("");
@@ -2482,6 +2736,8 @@ function mostrarAnalisis(r, { origen = "foto", nombre } = {}){
     ${r.items.length ? `<div class="item" style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em"><span>Comida</span><span style="text-align:right">kcal</span><span style="text-align:right">prot g</span></div>${filas}` : ""}
     ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
     <p id="totalIA" style="font-size:15px;margin:12px 0 0"></p>
+    ${r.items.length ? `<label class="campo">Comida</label>${selectTipo("rTipo", tipo || (fecha === TODAY ? tipoPorHora(horaAhora()) : "colacion"))}
+      <label class="chk"><input type="checkbox" id="rFrec"${frecuente ? " checked" : ""}> Guardar en frecuentes</label>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c">Descartar</button>${r.items.length ? `<button class="btn" data-x="o">Guardar</button>` : ""}</div>`);
   const total = () => {
     r.items.forEach((it, i) => { for(const k of ["kcal", "prot"]){
@@ -2494,10 +2750,11 @@ function mostrarAnalisis(r, { origen = "foto", nombre } = {}){
   total();
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="o"]')?.addEventListener("click", () => {
-    const t = total();
+    const t = total(), tipoSel = modal.querySelector("#rTipo").value, final = (nombre || r.items.map(i => i.nombre).join(", ")).slice(0, 80);
+    if(modal.querySelector("#rFrec").checked) guardarFrecuente({ tipo: tipoSel, nombre: final, kcal: t.kcal, prot: t.prot });
     closeSheet();
-    guardarComida({ nombre: (nombre || r.items.map(i => i.nombre).join(", ")).slice(0, 80), kcal: t.kcal, prot: t.prot, origen,
-                    detalle: r.items.map(({ nombre, porcion, kcal, prot }) => ({ nombre, porcion, kcal, prot })) });
+    guardarComida({ nombre: final, kcal: t.kcal, prot: t.prot, origen, tipo: tipoSel,
+                    detalle: r.items.map(({ nombre, porcion, kcal, prot }) => ({ nombre, porcion, kcal, prot })) }, fecha);
   });
 }
 
@@ -2506,6 +2763,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
   /* comida */ metasNutricion, totalComidas, normalizarAnalisis, claveIA,
   /* reflexión */ fraseDelDia, loQueSeCocina, REFLEXIONES,
+  /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
 </script>
 </body>
