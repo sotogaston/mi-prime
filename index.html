@@ -256,7 +256,12 @@ tr.tap{cursor:pointer}
 .comida .x{color:var(--muted);font-size:17px;width:32px;height:32px;border-radius:9px;display:grid;place-items:center}
 .sheet label.campo{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px}
 .sheet select{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:13px;padding:11px 12px;color:var(--ink);font:inherit;font-size:15px}
-.foto{width:100%;max-height:220px;object-fit:cover;border-radius:14px;display:block;margin-bottom:8px}
+.fotos{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px}
+.fotos.una{grid-template-columns:1fr}
+.fotos figure{position:relative;margin:0}
+.fotos img{width:100%;height:140px;object-fit:cover;border-radius:12px;display:block}
+.fotos.una img{height:220px}
+.fotos .x{position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:grid;place-items:center;font-size:15px}
 .item{display:grid;grid-template-columns:1fr 78px 64px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
 .item input{padding:8px;font-size:14px;text-align:right}
 .item small{display:block;color:var(--muted);font-size:12px}
@@ -1738,7 +1743,7 @@ function vComida(){
         <button class="btn ghost" data-act="cperfil" style="margin:0">Editar perfil</button></div></div>` : "";
   const ia = `<div class="card"><div class="card-t">Calorías con Claude</div>
     <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto, o lo que escribís en “Agregar a mano” sin poner las calorías, se manda a Claude Opus 5.5 (Anthropic), que estima calorías y proteína; la foto no se guarda en la app.
-      Cuesta unos 2 a 3 centavos de dólar cada vez (algo menos con texto) y se cobra en tu cuenta de Anthropic.</p>
+      Cuesta unos 2 a 3 centavos de dólar cada vez (algo menos con texto, algo más con varias fotos) y se cobra en tu cuenta de Anthropic.</p>
     <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
     <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>`;
   return alertaComidasHTML() + perfil + resumen + acciones + lista + semana + cuerpo + ia;
@@ -2672,6 +2677,7 @@ const CLAVE_IA = "miPrime.claveIA", MODELO_COMIDA = "claude-opus-5-5";
 const PROMPT_COMIDA = `Sos nutricionista y estimás calorías y proteínas de comidas a partir de una foto o de lo que la persona escribe, para alguien en Argentina que quiere bajar de peso sin perder músculo.
 - Identificá cada alimento o bebida. Con foto, estimá la porción con sus referencias (plato, cubiertos, manos, envases). Con texto, usá la cantidad que dice o, si no la dice, una porción típica en Argentina. Escribí la porción en gramos o en medidas caseras.
 - Calculá las kcal y los gramos de proteína de esa porción con valores de tablas nutricionales estándar. Sumá lo que no se ve pero suele llevar (aceite de cocción, manteca, aderezos) como estimación razonable y aclaralo en la nota.
+- Si hay varias fotos, son de la misma comida (otro plato, otro ángulo, la etiqueta): sumá todo lo que se come y no cuentes dos veces lo que aparece en más de una.
 - Si la persona escribe una aclaración, manda sobre lo que parece la foto.
 - Si no hay comida en la foto o en el texto, devolvé items vacíos y explicalo en la nota.
 - confianza: "alta" si está claro qué es y cuánto; "baja" si la porción o los ingredientes son dudosos.
@@ -2708,15 +2714,21 @@ function editarClave(){
   };
 }
 
-/* Cámara (capture) o galería. En la app de Android, Capacitor abre la cámara del celular. */
-function elegirFoto(camara){
+/* Cámara (capture) o galería, hasta 4 fotos de la misma comida: la primera abre
+   la hoja y desde ahí se suman las otras. En la app de Android, Capacitor abre la
+   cámara del celular; la galería deja elegir varias a la vez. */
+const MAX_FOTOS = 4;
+function elegirFoto(camara, previas = [], aclaracion = ""){
   if(!claveIA()){ editarClave(); return; }
+  const lugar = MAX_FOTOS - previas.length; if(lugar <= 0) return;
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "image/*";
   if(camara) inp.setAttribute("capture", "environment");
+  else inp.multiple = true;
   inp.onchange = async () => {
-    const f = inp.files[0]; if(!f) return;
-    try{ prepararFoto(await achicarFoto(f)); }
+    const archivos = [...inp.files]; if(!archivos.length) return;
+    if(archivos.length > lugar) toast(`Hasta ${MAX_FOTOS} fotos: entran ${lugar === 1 ? "1 más" : lugar + " más"}`);
+    try{ prepararFoto([...previas, ...await Promise.all(archivos.slice(0, lugar).map(achicarFoto))], aclaracion); }
     catch(e){ toast("No se pudo abrir la foto"); }
   };
   inp.click();
@@ -2731,16 +2743,29 @@ async function achicarFoto(archivo){
   const dataUrl = c.toDataURL("image/jpeg", 0.8);
   return { dataUrl, base64: dataUrl.split(",")[1] };
 }
-function prepararFoto(foto){
-  sheet(`<h3>¿Qué comés?</h3><img class="foto" src="${foto.dataUrl}" alt="Tu comida">
+function prepararFoto(fotos, aclaracion = ""){
+  const n = fotos.length;
+  sheet(`<h3>¿Qué comés?</h3>
+    <div class="fotos${n === 1 ? " una" : ""}">${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Foto ${i + 1} de tu comida">
+      <button class="x" data-q="${i}" aria-label="Sacar la foto ${i + 1}">✕</button></figure>`).join("")}</div>
+    ${n < MAX_FOTOS ? `<p class="pie" style="margin:4px 0 0">Podés sumar ${MAX_FOTOS - n === 1 ? "1 foto más" : `hasta ${MAX_FOTOS - n} fotos más`} de la misma comida: otro plato, otro ángulo, la etiqueta.</p>
+      <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px">
+        <button class="btn ghost" data-x="mc" style="margin:0">+ Sacar otra</button><button class="btn ghost" data-x="mg" style="margin:0">+ Elegir otra</button></div>` : ""}
     <label class="campo">Aclaración (opcional)</label>
-    <input type="text" id="aclara" maxlength="120" placeholder="Ej.: son 2 empanadas, la gaseosa es light">
-    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Analizar</button></div>`);
+    <input type="text" id="aclara" maxlength="120" placeholder="Ej.: son 2 empanadas, la gaseosa es light" value="${esc(aclaracion)}">
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Analizar${n > 1 ? ` ${n} fotos` : ""}</button></div>`);
+  const texto = () => modal.querySelector("#aclara").value.trim();
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="mc"]')?.addEventListener("click", () => elegirFoto(true, fotos, texto()));
+  modal.querySelector('[data-x="mg"]')?.addEventListener("click", () => elegirFoto(false, fotos, texto()));
+  modal.querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
+    const resto = fotos.filter((_, i) => i !== +b.dataset.q);
+    if(resto.length) prepararFoto(resto, texto()); else closeSheet();
+  });
   modal.querySelector('[data-x="o"]').onclick = async e => {
-    const boton = e.currentTarget, aclaracion = modal.querySelector("#aclara").value.trim();
+    const boton = e.currentTarget;
     boton.disabled = true; boton.textContent = "Analizando…";
-    try{ mostrarAnalisis(await analizarComida(foto.base64, aclaracion)); }
+    try{ mostrarAnalisis(await analizarComida(fotos.map(f => f.base64), texto())); }
     catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
   };
 }
@@ -2755,8 +2780,9 @@ function cargarSDK(){
     document.head.appendChild(s);
   });
 }
-/* Con foto (base64), el texto es una aclaración; sin foto, es la descripción de lo que comió */
-async function analizarComida(base64, texto){
+/* Con fotos (base64, hasta 4), el texto es una aclaración; sin fotos, es la descripción de lo que comió */
+async function analizarComida(fotos, texto){
+  const n = fotos?.length || 0;
   const { Anthropic, betaJSONSchemaOutputFormat } = await cargarSDK();
   const client = new Anthropic({ apiKey: claveIA(), dangerouslyAllowBrowser: true, timeout: 120000, maxRetries: 1 });
   const msg = await client.beta.messages.parse({
@@ -2766,9 +2792,10 @@ async function analizarComida(base64, texto){
     fallbacks: "default",
     system: PROMPT_COMIDA,
     output_config: { format: betaJSONSchemaOutputFormat(ESQUEMA_COMIDA) },
-    messages: [{ role: "user", content: base64 ? [
-      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-      { type: "text", text: texto ? `Aclaración: ${texto}` : "Estimá las calorías y proteínas de esta comida." }]
+    messages: [{ role: "user", content: n ? [
+      ...fotos.map(data => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } })),
+      { type: "text", text: (n > 1 ? `Son ${n} fotos de la misma comida. ` : "")
+          + (texto ? `Aclaración: ${texto}` : "Estimá las calorías y proteínas de esta comida.") }]
       : [{ type: "text", text: `Comí: ${texto}\nEstimá las calorías y proteínas.` }] }]
   });
   if(msg.stop_reason === "refusal") throw new Error("rechazo");
