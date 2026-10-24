@@ -1553,7 +1553,110 @@ console.log('\n== 38. Finanzas en la app de Android: aviso el día antes ==');
   await c.close();
 }
 
-console.log('\n== 39. Capturas ==');
+console.log('\n== 39. Hábitos de finanzas y a dónde vas ==');
+{
+  const habito = (id, regla, extra = {}) => ({ id, name: regla, order: 0, auto: { source: 'finanzas', regla, desde: '2026-11-02' }, ...extra });
+  const st = { ...estado({ lastClosed: '2026-11-03', habits: [habito('a', 'anotar'), habito('s', 'sinDeuda'), habito('r', 'ritmo'), habito('v', 'vencimientos')] }),
+    finanzas: { ...finanzas(), presupuestoAlimentos: 300000, gastos: { '2026-11-02': [{ id: 'g1', comercio: 'Coto', total: 150000 }], '2026-11-03': [{ id: 'g2', comercio: 'Kiosco', total: 20000 }] },
+      fijos: [{ id: 'f1', nombre: 'Alquiler', monto: 700000, dia: 3 }], deudas: [{ id: 'd9', nombre: 'Préstamo nuevo', saldo: 1, cuota: 1, alta: '2026-11-03' }] } };
+  const L = cargarLogica(st);
+  ok('el ritmo de alimentos: lo del mes repartido por día, con una semana de margen y nunca más que el presupuesto',
+    L.topeRitmo(600000, '2026-11-04') === 220000 && L.topeRitmo(600000, '2026-11-25') === 600000 && L.topeRitmo(600000, '2026-11-30') === 600000);
+  const n = L.marcarPorFinanzas(st, '2026-11-04'), m = d => JSON.stringify(st.marks[d]);
+  ok('se marcan solos desde que se sumaron: anotar verde el día con gasto, la deuda nueva amarilla, el ritmo según lo gastado ' + m('2026-11-03'),
+    n === 9 && st.marks['2026-11-02'].a === 'green' && st.marks['2026-11-03'].s === 'yellow' && st.marks['2026-11-02'].s === 'green'
+    && st.marks['2026-11-02'].r === 'yellow' && !st.marks['2026-11-04'].a && !st.marks['2026-11-01']);
+  ok('los vencimientos se miran hoy: el alquiler del 3 sin pagar deja amarillo', st.marks['2026-11-04'].v === 'yellow' && !st.marks['2026-11-03'].v
+    && L.estadoFinanzas(st.finanzas, 'vencimientos', '2026-11-03', '2026-11-04') === undefined);
+  ok('las marcas de la app se leen en amarillo, no como sin dato', L.getMark('2026-11-03', 's') === 'yellow' && st.marcasFin['2026-11-03'].includes('s')
+    && !(st.autoClosed['2026-11-03'] || []).includes('s'));
+  ok('si no cambió nada, no vuelve a marcar', L.marcarPorFinanzas(st, '2026-11-04') === 0);
+  delete st.finanzas.gastos['2026-11-03'];
+  st.finanzas.pagos = { '2026-11': ['f:f1'] };
+  L.marcarPorFinanzas(st, '2026-11-04');
+  ok('sin el gasto, el día vuelve a como lo deja el cierre (sin dato); pagado el alquiler, vencimientos verde',
+    L.getMark('2026-11-03', 'a') === 'nodata' && !(st.marcasFin['2026-11-03'] || []).includes('a') && st.marks['2026-11-04'].v === 'green');
+  st.marks['2026-11-02'].r = 'green'; L.markManual(st, '2026-11-02', 'r');
+  L.marcarPorFinanzas(st, '2026-11-04');
+  ok('lo que marcaste vos manda: no se toca', st.marks['2026-11-02'].r === 'green' && !(st.marcasFin['2026-11-02'] || []).includes('r'));
+  const R = cargarLogica(estado()).rumboFinanzas(finanzas(), '2026-11-04');
+  ok('a dónde vas: faltan 50 mil, desde diciembre cierra, en noviembre termina la Billetera, la última cuota en febrero, el colchón en diciembre',
+    R.sobra === -50000 && R.cierraDesde === '2026-12' && R.terminan.mes === '2026-11' && R.terminan.nombres.join() === 'Billetera' && R.terminan.libera === 100000
+    && R.ultima === '2027-02' && R.hito.meses === 1 && R.hito.mes === '2026-12' && R.alimentos.tope === 146667 && R.vencimientos.total === 5);
+  ok('las frases de finanzas van en rueda: a la mañana una, a la tarde otra', L.fraseFinanzas('2026-11-04').t !== L.fraseFinanzas('2026-11-04', true).t
+    && L.FRASES_FINANZAS.length === 12);
+
+  const { p, c, errs } = await abrirEn('2026-11-04', { ...estado({ lastClosed: '2026-11-03' }), finanzas: finanzas() });
+  const S = () => p.evaluate(() => window.__prime.S);
+  const fila = nombre => p.locator('.hrow', { hasText: nombre });
+  const marca = async nombre => (await fila(nombre).locator('.dot').getAttribute('class')).replace('dot', '').trim();
+  const hoyCard = await p.locator('.finanzas-hoy').innerText();
+  ok('Hoy muestra una frase de finanzas y un dato tuyo', /Finanzas · a dónde vas/i.test(hoyCard) && hoyCard.split('\n').length >= 3);
+  await p.locator('.finanzas-hoy').click();
+  const hoja = await p.locator('.sheet').innerText();
+  ok('tocándola se ve a dónde vas, con tus números', /Noviembre: te faltan \$ 50\.000\. Desde diciembre 2026, todos los meses cierran solos\./.test(hoja)
+    && /En noviembre 2026 terminás Billetera: se liberan \$ 100\.000 por mes\./.test(hoja) && /La última cuota de todas es en febrero 2027/.test(hoja)
+    && /En diciembre 2026 llegás a un mes de gastos en el colchón/.test(hoja) && /Alimentos: \$ 0 de \$ 400\.000, vas al ritmo\./.test(hoja)
+    && /De noviembre pagaste 0 de 5 vencimientos; falta \$ 1\.350\.000\./.test(hoja) && /Nunca una deuda para pagar otra/.test(hoja));
+  await p.locator('.sheet [data-x="f"]').click(); await p.waitForTimeout(150);
+  ok('y lleva a Finanzas, que arranca con a dónde vas', /A dónde vas/i.test(await p.locator('.rumbo-card').innerText())
+    && await p.locator('.rumbo-card .rumbo').count() >= 5);
+  for (const r of ['anotar', 'sinDeuda', 'ritmo', 'vencimientos']) { await p.locator(`[data-act="fhabito"][data-r="${r}"]`).click(); await p.waitForTimeout(80); }
+  const hs = (await S()).habits.filter(h => h.auto?.source === 'finanzas');
+  ok('los cuatro hábitos se suman a Hoy, desde hoy; anotar con aviso a las 21', hs.length === 4 && hs.every(h => h.auto.desde === '2026-11-04')
+    && hs.find(h => h.auto.regla === 'anotar').hora === '21:00' && await p.locator('[data-act="fhabito"][aria-checked="true"]').count() === 4);
+  await ir(p, 'hoy');
+  ok('en Hoy: sin deuda, al ritmo y al día en verde; anotar espera el gasto',
+    await marca('Sin deuda nueva') === 's-green' && await marca('Alimentos al ritmo') === 's-green' && await marca('Vencimientos al día') === 's-green'
+    && await marca('Anotar lo que gasto') === '' && /nada anotado hoy/.test(await fila('Anotar lo que gasto').innerText())
+    && /\$ 0 de \$ 146\.667 hasta hoy/.test(await fila('Alimentos al ritmo').innerText()) && /al día/.test(await fila('Vencimientos al día').innerText()));
+  await ir(p, 'finanzas');
+  await p.locator('[data-act="fmano"]').click(); await p.locator('#gNombre').fill('Súper'); await p.locator('#gTotal').fill('200000');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  await ir(p, 'hoy');
+  ok('cargado un gasto: anotar en verde; 200 mil se adelanta al ritmo y queda amarillo',
+    await marca('Anotar lo que gasto') === 's-green' && await marca('Alimentos al ritmo') === 's-yellow'
+    && /\$ 200\.000 anotado hoy/.test(await fila('Anotar lo que gasto').innerText()) && /\$ 200\.000 de \$ 146\.667 hasta hoy/.test(await fila('Alimentos al ritmo').innerText()));
+  await ir(p, 'finanzas');
+  await p.locator('[data-act="fborrarGasto"]').first().click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  await p.locator('[data-act="fmov"]').click(); await p.locator('#mNombre').fill('Adelanto'); await p.locator('#mMonto').fill('300000');
+  await p.locator('#mDeuda').check(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  await ir(p, 'hoy');
+  ok('sin el gasto vuelven atrás; un adelanto marcado como deuda nueva deja "Sin deuda nueva" en amarillo',
+    await marca('Anotar lo que gasto') === '' && await marca('Alimentos al ritmo') === 's-green' && await marca('Sin deuda nueva') === 's-yellow'
+    && (await S()).finanzas.movimientos.some(m => m.deuda && m.alta === '2026-11-04'));
+  await fila('Sin deuda nueva').locator('.more').click(); await p.locator('.opt').nth(0).click(); await p.waitForTimeout(150);
+  ok('si lo marcás vos, manda', await marca('Sin deuda nueva') === 's-green' && !((await S()).marcasFin['2026-11-04'] || []).includes((await S()).habits.find(h => h.auto?.regla === 'sinDeuda').id));
+  await ir(p, 'finanzas');
+  const idRitmo = (await S()).habits.find(h => h.auto?.regla === 'ritmo').id;
+  ok('antes de sacarlo tiene marcas', JSON.stringify((await S()).marcasFin).includes(idRitmo));
+  await p.locator('[data-act="fhabito"][data-r="ritmo"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('apagarlo pide confirmación y lo saca de Hoy con sus marcas', !(await S()).habits.some(h => h.auto?.regla === 'ritmo')
+    && await p.locator('[data-act="fhabito"][data-r="ritmo"]').getAttribute('aria-checked') === 'false'
+    && !JSON.stringify((await S()).marcasFin).includes(idRitmo) && !JSON.stringify((await S()).marks).includes(idRitmo));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{}, { marcasFin: { '2026-11-04': 'a' } }, { marcasFin: { hoy: [] } }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae las marcas de finanzas y rechaza las rotas (' + resp + ')', resp === 'ok,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+
+  // Un vencimiento que pasó sin marcar: amarillo hasta que se marca pagado
+  const { p: p2, c: c2, errs: e2 } = await abrirEn('2026-11-06', { ...estado({ lastClosed: '2026-11-05', habits: [habito('v', 'vencimientos', { name: 'Vencimientos al día' })] }), finanzas: finanzas() });
+  ok('el alquiler del 5 sin marcar deja "Vencimientos al día" en amarillo', (await p2.locator('.hrow .dot').getAttribute('class')).includes('s-yellow')
+    && /1 vencido sin marcar/.test(await p2.locator('.hrow').innerText()) && /Venció sin marcar: Alquiler/.test(await p2.locator('.alerta-venc').innerText()));
+  await ir(p2, 'finanzas');
+  await p2.locator('[data-act="fpagar"][data-k="f:f1"]').click(); await p2.waitForTimeout(150);
+  await ir(p2, 'hoy');
+  ok('marcado como pagado, vuelve a verde', (await p2.locator('.hrow .dot').getAttribute('class')).includes('s-green') && /al día/.test(await p2.locator('.hrow').innerText()));
+  ok('sin errores de página: ' + JSON.stringify(e2), e2.length === 0);
+  await c2.close();
+}
+
+console.log('\n== 40. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
