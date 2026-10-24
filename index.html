@@ -290,6 +290,8 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 .renglon{display:flex;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line);color:var(--ink-2)}
 .renglon span{flex:1;min-width:0}
 .renglon b{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.rumbo{margin:0;padding:8px 0;border-bottom:1px solid var(--line);font-size:14.5px;line-height:1.45}
+.rumbo:last-of-type{border-bottom:none}
 .cab{display:flex;align-items:center;gap:2px}
 .cab span{flex:1}
 .cab button{width:30px;height:26px;border-radius:8px;font-size:17px;color:var(--ink-2);letter-spacing:0}
@@ -706,12 +708,14 @@ function markAutoClosed(S, date, hid){
   if(!S.autoClosed) S.autoClosed = {};
   (S.autoClosed[date] = S.autoClosed[date] || []).push(hid);
 }
-function markManual(S, date, hid){
-  const a = S.autoClosed?.[date];
+/* La marca pasa a ser tuya: deja de ser del cierre automático y de Finanzas */
+function markManual(S, date, hid){ sacarDe(S.autoClosed, date, hid); sacarDe(S.marcasFin, date, hid); }
+function sacarDe(mapa, date, hid){
+  const a = mapa?.[date];
   if(!a) return;
   const i = a.indexOf(hid);
   if(i >= 0) a.splice(i, 1);
-  if(a.length === 0) delete S.autoClosed[date];
+  if(a.length === 0) delete mapa[date];
 }
 
 /* ---- import desde Samsung Health ----
@@ -1184,10 +1188,11 @@ function mazo(ciclo, n){
   if(n > 1 && p[0] === mezcla(n, Math.imul(ciclo - 1, 2654435761) + 12345)[n - 1]) [p[0], p[1]] = [p[1], p[0]];
   return p;
 }
-function fraseDelDia(fecha, tarde = false){
-  const k = REFLEXIONES.length, turno = Math.round(parseISO(fecha).getTime() / 864e5) * 2 + (tarde ? 1 : 0);
+function fraseDelDia(fecha, tarde = false){ return deLaRueda(REFLEXIONES, fecha, tarde); }
+function deLaRueda(lista, fecha, tarde){
+  const k = lista.length, turno = Math.round(parseISO(fecha).getTime() / 864e5) * 2 + (tarde ? 1 : 0);
   const ciclo = Math.floor(turno / k), pos = turno - ciclo * k;
-  return REFLEXIONES[mazo(ciclo, k)[pos]];
+  return lista[mazo(ciclo, k)[pos]];
 }
 /* Lo que se está cocinando: todas las marcas en verde y desde cuándo */
 function loQueSeCocina(S){
@@ -1328,6 +1333,102 @@ function normalizarTicket(r){
   return { comercio: String(r?.comercio || "").trim().slice(0, 60), fecha, items,
            total: plata(r?.total, 0) || Math.max(0, suma(items, i => i.precio)),
            nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
+}
+
+/* ---- hábitos de finanzas ----
+   Se marcan solos con lo que se carga en Finanzas, como "Caminar seguido" con
+   los pasos: h.auto = { source: "finanzas", regla, desde }. Lo que marcaste vos
+   no se toca. Lo que marcó la app queda anotado en S.marcasFin, así se puede
+   cambiar si cambian los datos (un ticket de ayer, un pago marcado tarde). La
+   plata no tiene fin de semana: se miran todos los días. */
+const HABITOS_FINANZAS = {
+  anotar:       { nombre: "Anotar lo que gasto", hora: "21:00",
+                  que: "Verde el día que cargás un gasto de alimentos. Si no gastaste, lo marcás vos. A las 21 te avisa si no anotaste." },
+  sinDeuda:     { nombre: "Sin deuda nueva", que: "Verde cada día; amarillo el día que cargás una deuda nueva o un adelanto." },
+  ritmo:        { nombre: "Alimentos al ritmo", que: "Verde mientras lo gastado en el mes no se adelanta más de una semana al presupuesto." },
+  vencimientos: { nombre: "Vencimientos al día", que: "Verde si no hay ninguna cuota ni gasto vencido sin marcar como pagado." }
+};
+/* Lo que se puede haber gastado en alimentos hasta ese día: el presupuesto del
+   mes repartido por día, con una semana de margen para la compra grande */
+function topeRitmo(presupuesto, ds){
+  const d = parseISO(ds), dim = daysInMonth(d.getFullYear(), d.getMonth());
+  return Math.round(presupuesto * Math.min(1, (d.getDate() + 7) / dim));
+}
+function gastadoHasta(gastos, ds){ return suma(gastosDelMes(gastos, mesDe(ds)).filter(x => x.fecha <= ds), x => x.g.total); }
+function deudaNuevaEl(F, ds){ return [...(F?.deudas || []), ...(F?.movimientos || []).filter(m => m.deuda)].some(x => x.alta === ds); }
+/* ¿Hay algo de este mes o del anterior que ya venció y no está marcado como pagado? */
+function vencidoSinPagar(F, hoy){
+  return [sumarMeses(mesDe(hoy), -1), mesDe(hoy)].some(mes => !(F?.inicio > mes)
+    && vencimientos(F, mes).some(v => v.fecha && v.fecha < hoy && !v.pagado));
+}
+/* Lo que dice la regla de un día: verde, amarillo, null (no se marca solo) o
+   undefined (no se mira: los vencimientos de días pasados quedan como estaban) */
+function estadoFinanzas(F, regla, ds, hoy){
+  if(regla === "anotar") return F?.gastos?.[ds]?.length ? ST.GREEN : null;
+  if(regla === "sinDeuda") return deudaNuevaEl(F, ds) ? ST.YELLOW : ST.GREEN;
+  if(regla === "ritmo") return gastadoHasta(F?.gastos, ds) <= topeRitmo(presupuestoAlimentos(F), ds) ? ST.GREEN : ST.YELLOW;
+  if(regla === "vencimientos") return ds !== hoy ? undefined : vencidoSinPagar(F, hoy) ? ST.YELLOW : ST.GREEN;
+  return null;
+}
+/* Marca los hábitos de finanzas desde que se sumaron hasta hoy; devuelve cuántas marcas cambió */
+function marcarPorFinanzas(S, hoy){
+  let cambios = 0;
+  for(const h of S.habits.filter(x => x.auto?.source === "finanzas")){
+    for(let d = parseISO(h.auto.desde || hoy); iso(d) <= hoy; d = addDays(d, 1)){
+      const ds = iso(d), st = estadoFinanzas(S.finanzas, h.auto.regla, ds, hoy);
+      if(st === undefined) continue;
+      const mia = (S.marcasFin?.[ds] || []).includes(h.id);
+      if(!mia && originOf(S, ds, h.id) === ORIGIN.MANUAL) continue;      // lo marcaste vos
+      if(st === null){
+        if(!mia) continue;
+        sacarDe(S.marcasFin, ds, h.id);                                  // queda como lo deja el cierre automático
+        if(ds === hoy) setMark(ds, h.id, null);
+        else { setMark(ds, h.id, esLibre(ds) ? ST.BLUE : ST.YELLOW); markAutoClosed(S, ds, h.id); }
+        cambios++;
+        continue;
+      }
+      if(mia && getMark(ds, h.id) === st) continue;
+      setMark(ds, h.id, st);
+      sacarDe(S.autoClosed, ds, h.id);
+      if(!mia) ((S.marcasFin ||= {})[ds] ||= []).push(h.id);
+      cambios++;
+    }
+  }
+  return cambios;
+}
+
+/* ---- a dónde vas: lo que dicen tus números, para armar las frases ---- */
+const FRASES_FINANZAS = [
+  { t: "Nunca una deuda para pagar otra." },
+  { t: "Lo que no se anota, no se controla." },
+  { t: "Un mes apretado no rompe el plan: lo corre un poco." },
+  { t: "Cada cuota que termina es plata que vuelve a ser tuya." },
+  { t: "Un adelanto de sueldo es un préstamo con otro nombre." },
+  { t: "La tarjeta se paga entera. El pago mínimo es la puerta de la deuda cara." },
+  { t: "El colchón no es plata quieta: es la que te evita pedir prestado." },
+  { t: "Primero lo que vence; después lo que se antoja." },
+  { t: "No importa cuánto entra: importa cuánto queda." },
+  { t: "Antes de comprar en cuotas, preguntate si lo comprarías de contado." },
+  { t: "La libertad financiera empieza el día que dejás de deber." },
+  { t: "Dos meses ordenados valen más que un mes perfecto." }
+];
+function fraseFinanzas(fecha, tarde = false){ return deLaRueda(FRASES_FINANZAS, fecha, tarde); }
+function rumboFinanzas(F, hoy){
+  const mes = F?.inicio > mesDe(hoy) ? F.inicio : mesDe(hoy), p = proyeccionFinanzas(F, mes, 24, hoy);
+  const cierraDesde = p[0].sobra < 0 ? p.find((x, i) => i > 0 && p.slice(i, i + 12).every(y => y.sobra >= 0))?.mes || null : null;
+  const conFin = (F?.deudas || []).filter(d => d.hasta && d.hasta >= mes), fin = conFin.map(d => d.hasta).sort()[0];
+  const terminan = conFin.filter(d => d.hasta === fin);
+  const sinFin = (F?.deudas || []).some(d => !d.hasta && d.saldo > 0);
+  const v = vencimientos(F, mes);
+  return {
+    mes, sobra: p[0].sobra, cierraDesde,
+    terminan: fin ? { mes: fin, nombres: terminan.map(d => d.nombre), libera: suma(terminan, d => d.cuota || cuotaDelMes(d, fin)) } : null,
+    ultima: !sinFin && conFin.length ? conFin.map(d => d.hasta).sort().at(-1) : null,
+    cuotas: { ahora: p[0].cuotas, mes: p[6].mes, despues: p[6].cuotas },
+    hito: hitosColchon(F, mes, hoy).find(h => !h.ya) || null,
+    alimentos: mes === mesDe(hoy) ? { gastado: gastadoHasta(F?.gastos, hoy), presupuesto: presupuestoAlimentos(F), tope: topeRitmo(presupuestoAlimentos(F), hoy) } : null,
+    vencimientos: { total: v.length, pagados: v.filter(x => x.pagado).length, falta: suma(v.filter(x => !x.pagado), x => x.monto) }
+  };
 }
 /* @logica:fin */
 
@@ -1473,6 +1574,7 @@ function diaRelativo(ds){
 const view = document.getElementById("view");
 
 function render(){
+  if(marcarPorFinanzas(S, TODAY)) save();   // los hábitos de finanzas siguen a lo que se cargó
   view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, finanzas:vFinanzas, mas:vMas })[TAB]();
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
@@ -1546,7 +1648,8 @@ function vHoy(){
     const dePasos = h.auto?.source === "steps", hoyPasos = S.pasos?.[TODAY];
     const g = dePasos ? null : h.goal, val = S.values?.[TODAY]?.[h.id];
     const meta = dePasos ? (free ? "" : `<span>${hoyPasos != null ? fmt(hoyPasos) + "/" : ""}${fmt(metaPasos(S))} pasos</span>`)
-      : g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>` : "";
+      : g ? `<span>${val != null ? val + "/" : ""}${g.meta} ${esc(g.unidad)}</span>`
+      : h.auto?.source === "finanzas" ? `<span>${detalleHabitoFin(h.auto.regla)}</span>` : "";
     return `<div class="hrow">
       <button class="dot ${st?("s-"+st):""}" data-act="quick" data-h="${h.id}"${g?' data-goal="1"':""} aria-label="Marcar ${esc(h.name)}">${stGlyph(st)}</button>
       <div class="hmeta">
@@ -1572,6 +1675,7 @@ function vHoy(){
   ${pendHTML}
   ${avisosHTML()}
   ${reflexionHTML()}
+  ${finanzasHoyHTML()}
   <div class="stats">
     <div class="stat"><b style="color:var(--ok)">${r.victorias}</b><span>Victorias</span></div>
     <div class="stat"><b style="color:var(--fail)">${r.reglasRotas}</b><span>Reglas rotas</span></div>
@@ -2179,8 +2283,8 @@ function mesDelPlan(F){ const m = mesDe(TODAY); return F.inicio > m ? F.inicio :
 
 function vFinanzas(){
   const F = fin(), conPlan = F.ingresos.length + F.fijos.length + F.deudas.length > 0;
-  return alertaVencimientosHTML() + (conPlan ? mesFinHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML()) + alimentosHTML(F)
-    + (conPlan ? colchonHTML(F) + deudasHTML(F) + proximosHTML(F) : "") + datosFinHTML(conPlan);
+  return alertaVencimientosHTML() + (conPlan ? rumboHTML(F) + mesFinHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML()) + alimentosHTML(F)
+    + (conPlan ? colchonHTML(F) + deudasHTML(F) + proximosHTML(F) : "") + habitosFinHTML() + datosFinHTML(conPlan);
 }
 function bienvenidaFinHTML(){
   return `<div class="card"><div class="card-t">Tus finanzas</div>
@@ -2313,6 +2417,75 @@ function datosFinHTML(conPlan){
     <button class="btn ghost" data-act="fimport">Importar finanzas (.json)</button></div>` : ""}`;
 }
 
+/* ---- a dónde vas: frases con tus números, en Finanzas y en Hoy ---- */
+function frasesRumbo(F){
+  const r = rumboFinanzas(F, TODAY), nombre = m => MESES[Number(m.slice(5)) - 1], out = [];
+  const lista = l => esc(l.length > 1 ? l.slice(0, -1).join(", ") + " y " + l.at(-1) : l[0]);
+  out.push(`${cap(nombre(r.mes))}: ${r.sobra >= 0 ? `te sobran <b>${aPesos(r.sobra)}</b>` : `te faltan <b>${aPesos(-r.sobra)}</b>`}.`
+    + (r.cierraDesde ? ` Desde ${nombreMes(r.cierraDesde)}, todos los meses cierran solos.` : ""));
+  if(r.terminan) out.push(`En ${nombreMes(r.terminan.mes)} terminás ${lista(r.terminan.nombres)}${r.terminan.libera ? `: se liberan <b>${aPesos(r.terminan.libera)}</b> por mes` : ""}.`);
+  if(r.cuotas.despues > 0 && r.cuotas.despues < r.cuotas.ahora)
+    out.push(`Las cuotas bajan de ${aPesos(r.cuotas.ahora)} en ${nombre(r.mes)} a <b>${aPesos(r.cuotas.despues)}</b> en ${nombreMes(r.cuotas.mes)}.`);
+  if(r.ultima) out.push(`La última cuota de todas es en ${nombreMes(r.ultima)}: desde ahí, sin deudas.`);
+  if(r.hito?.mes) out.push(`En ${nombreMes(r.hito.mes)} llegás a ${r.hito.meses === 1 ? "un mes" : r.hito.meses + " meses"} de gastos en el colchón.`);
+  if(r.alimentos) out.push(`Alimentos: ${aPesos(r.alimentos.gastado)} de ${aPesos(r.alimentos.presupuesto)}, ${r.alimentos.gastado <= r.alimentos.tope
+    ? "vas al ritmo." : `te adelantaste <b>${aPesos(r.alimentos.gastado - r.alimentos.tope)}</b> al ritmo.`}`);
+  const sd = S.habits.find(h => h.auto?.source === "finanzas" && h.auto.regla === "sinDeuda"), n = sd ? streak(sd.id) : 0;
+  if(n > 1) out.push(`Llevás <b>${n} días</b> sin deuda nueva.`);
+  if(r.vencimientos.total) out.push(`De ${nombre(r.mes)} pagaste ${r.vencimientos.pagados} de ${r.vencimientos.total} vencimientos; falta <b>${aPesos(r.vencimientos.falta)}</b>.`);
+  return out;
+}
+function rumboHTML(F){
+  return `<div class="card rumbo-card"><div class="card-t">A dónde vas</div>${frasesRumbo(F).map(l => `<p class="rumbo">${l}</p>`).join("")}</div>`;
+}
+/* En Hoy, como la reflexión: una frase a la mañana y otra a la tarde, más un dato tuyo que cambia cada día */
+function finanzasHoyHTML(){
+  const F = S.finanzas;
+  if(!(F?.ingresos?.length || F?.fijos?.length || F?.deudas?.length)) return "";
+  const lineas = frasesRumbo(F), dato = lineas[Math.round(parseISO(TODAY).getTime() / 864e5) % lineas.length];
+  return `<button class="card reflex finanzas-hoy" data-act="rumbo"><div class="card-t">Finanzas · a dónde vas</div>
+    <p class="frase">${esc(fraseFinanzas(TODAY, esTarde()).t)}</p><small>${dato}</small><span class="ver">Ver todo</span></button>`;
+}
+function verRumbo(){
+  const ahora = fraseFinanzas(TODAY, esTarde());
+  sheet(`<h3>A dónde vas</h3><p class="sub">Con lo que tenés cargado hoy en Finanzas.</p>
+    ${frasesRumbo(fin()).map(l => `<p class="rumbo">${l}</p>`).join("")}
+    <p class="frec-t">Para tener presente</p>
+    ${FRASES_FINANZAS.map(f => `<blockquote${f === ahora ? ' class="hoy"' : ""}>${esc(f.t)}</blockquote>`).join("")}
+    <div class="row2"><button class="btn ghost" data-x="c">Cerrar</button><button class="btn" data-x="f">Ir a Finanzas</button></div>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="f"]').onclick = () => { closeSheet(); TAB = "finanzas"; render(); };
+}
+/* Los cuatro hábitos de finanzas: se suman a Hoy y se marcan solos (marcarPorFinanzas) */
+function habitosFinHTML(){
+  return `<div class="card habitos-fin"><div class="card-t">Hábitos de finanzas</div>
+    <p style="margin:0 0 4px;font-size:13px;color:var(--ink-2);line-height:1.5">Se suman a Hoy y se marcan solos con lo que cargás acá,
+      como Caminar seguido con los pasos. Lo que marques vos manda.</p>
+    ${Object.entries(HABITOS_FINANZAS).map(([k, x]) => {
+      const on = S.habits.some(h => h.auto?.source === "finanzas" && h.auto.regla === k);
+      return `<div class="srow"><span>${x.nombre}<small style="display:block;color:var(--muted);font-size:12px;margin-top:2px;line-height:1.4">${x.que}</small></span>
+        <button class="switch" data-act="fhabito" data-r="${k}" role="switch" aria-checked="${on}" aria-label="${x.nombre}"></button></div>`;
+    }).join("")}</div>`;
+}
+/* Lo que dice hoy cada hábito de finanzas, debajo de su nombre en Hoy */
+function detalleHabitoFin(regla){
+  const F = S.finanzas;
+  if(regla === "anotar"){ const t = suma(F?.gastos?.[TODAY], g => g.total); return t ? `${aPesos(t)} anotado hoy` : "nada anotado hoy"; }
+  if(regla === "ritmo") return `${aPesos(gastadoHasta(F?.gastos, TODAY))} de ${aPesos(topeRitmo(presupuestoAlimentos(F), TODAY))} hasta hoy`;
+  if(regla === "vencimientos"){
+    const n = [sumarMeses(mesDe(TODAY), -1), mesDe(TODAY)].filter(m => !(F?.inicio > m)).flatMap(m => vencimientos(F, m))
+      .filter(v => v.fecha && v.fecha < TODAY && !v.pagado).length;
+    return n ? `${n} ${n === 1 ? "vencido" : "vencidos"} sin marcar` : "al día";
+  }
+  return "se marca solo";
+}
+function alternarHabitoFin(regla){
+  const x = HABITOS_FINANZAS[regla], h = S.habits.find(y => y.auto?.source === "finanzas" && y.auto.regla === regla);
+  if(h){ confirmSheet(`¿Sacar ${h.name}?`, "Se borra también su historial de marcas.", "Sacar", () => borrarHabito(h.id)); return; }
+  S.habits.push({ id: uid(), name: x.nombre, order: S.habits.length, ...(x.hora ? { hora: x.hora } : {}), auto: { source: "finanzas", regla, desde: TODAY } });
+  save(); render(); toast(`${x.nombre}: sumado a Hoy`);
+}
+
 /* ---- listas: lo que entra, la casa, las deudas y el colchón ---- */
 const LISTAS_FIN = {
   ingresos: { titulo: "Lo que entra", nuevo: "Agregar un ingreso",
@@ -2379,7 +2552,7 @@ function editarItemFin(tipo, id, volver){
       else if(c === "mes"){ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)){ toast("Elegí el mes de la última cuota"); return; } nuevo[k] = v; }
     }
     if(x){ for(const [k] of L.campos) delete x[k === "aguinaldo" ? "meses" : k]; Object.assign(x, nuevo); }
-    else F[tipo].push({ id: uid(), ...nuevo });
+    else F[tipo].push({ id: uid(), ...nuevo, ...(tipo === "deudas" ? { alta: TODAY } : {}) });   // la fecha cuenta para "Sin deuda nueva"
     save(); render(); salir(); toast(x ? "Guardado" : "Agregado");
   };
   if(!x) $("#f_nombre").focus();
@@ -2392,6 +2565,7 @@ function nuevoMovimiento(mes){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="mTipo">Entra o sale</label><select id="mTipo"><option value="1">Entra</option><option value="-1">Sale</option></select></div>
       <div><label class="campo" for="mMonto">Monto</label><input type="number" id="mMonto" inputmode="numeric" min="0"></div></div>
+    <label class="chk"><input type="checkbox" id="mDeuda"> Es un préstamo o un adelanto: deuda nueva</label>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
   const $ = q => modal.querySelector(q);
   $("#mNombre").focus();
@@ -2399,7 +2573,8 @@ function nuevoMovimiento(mes){
   $('[data-x="o"]').onclick = () => {
     const nombre = $("#mNombre").value.trim(), n = Math.round(Number($("#mMonto").value));
     if(!nombre || !(n > 0 && n <= 1e10)){ toast("Poné qué es y el monto"); return; }
-    fin().movimientos.push({ id: uid(), mes, nombre: nombre.slice(0, 60), monto: n * Number($("#mTipo").value) });
+    fin().movimientos.push({ id: uid(), mes, nombre: nombre.slice(0, 60), monto: n * Number($("#mTipo").value),
+                             ...($("#mDeuda").checked ? { deuda: true, alta: TODAY } : {}) });
     save(); closeSheet(); render(); toast("Agregado a " + MESES[Number(mes.slice(5)) - 1]);
   };
 }
@@ -2625,11 +2800,7 @@ function onAct(e){
     case "prevM": cursor.m--; if(cursor.m < 0){ cursor.m = 11; cursor.y--; } render(); break;
     case "nextM": cursor.m++; if(cursor.m > 11){ cursor.m = 0; cursor.y++; } render(); break;
     case "addH": addHabit(); break;
-    case "delH": confirmSheet("¿Borrar hábito?", "Se borra también su historial de marcas.", "Borrar", () => {
-        S.habits = S.habits.filter(h => h.id !== hid);
-        for(const d in S.marks) delete S.marks[d][hid];
-        save(); render();
-      }); break;
+    case "delH": confirmSheet("¿Borrar hábito?", "Se borra también su historial de marcas.", "Borrar", () => borrarHabito(hid)); break;
     case "editH": editHabit(hid); break;
     case "pend": applyMark(el.dataset.d, hid, el.dataset.st); break;
     case "reflexion": verReflexion(); break;
@@ -2688,6 +2859,8 @@ function onAct(e){
     case "fmov": nuevoMovimiento(el.dataset.m); break;
     case "fborrarMov": { const F = fin(); F.movimientos = F.movimientos.filter(m => m.id !== el.dataset.id); save(); render(); toast("Sacado"); break; }
     case "fimport": doImportFinanzas(); break;
+    case "rumbo": verRumbo(); break;
+    case "fhabito": alternarHabitoFin(el.dataset.r); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -2761,6 +2934,12 @@ function toast(msg){
 }
 
 /* ---------- CRUD ---------- */
+function borrarHabito(hid){
+  S.habits = S.habits.filter(h => h.id !== hid);
+  for(const d in S.marks) delete S.marks[d][hid];
+  for(const d in S.marcasFin || {}) sacarDe(S.marcasFin, d, hid);
+  save(); render();
+}
 function addHabit(){
   const i = document.getElementById("newHabit"); if(!i) return;
   const v = i.value.trim(); if(!v) return;
@@ -2867,7 +3046,7 @@ function prepararRespaldo(texto){
     throw new Error("Hay un horario mal escrito.");
   for(const k of ["feriados", "laborables"])
     if(data[k] != null && !(Array.isArray(data[k]) && data[k].every(esFecha))) throw new Error(`El campo "${k}" está roto.`);
-  const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj, pasos:esObj };
+  const forma = { notes:esObj, doLess:Array.isArray, doMore:Array.isArray, settings:esObj, autoClosed:esObj, values:esObj, pasos:esObj, marcasFin:esObj };
   for(const [k, ok] of Object.entries(forma))
     if(data[k] != null && !ok(data[k])) throw new Error(`El campo "${k}" está roto.`);
   if(data.pasos && !Object.entries(data.pasos).every(([d, n]) => esFecha(d) && Number.isInteger(n) && n >= 0))
@@ -2885,6 +3064,8 @@ function prepararRespaldo(texto){
   if(data.perfil != null && !esObj(data.perfil)) throw new Error(`El campo "perfil" está roto.`);
   if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
     throw new Error(`El campo "autoClosed" está roto.`);
+  if(data.marcasFin && !Object.entries(data.marcasFin).every(([d, l]) => esFecha(d) && Array.isArray(l)))
+    throw new Error(`El campo "marcasFin" está roto.`);
   if(data.settings?.lastClosed != null && !esFecha(data.settings.lastClosed))
     throw new Error("La fecha del último cierre está rota.");
   if(data.finanzas != null) validarFinanzas(data.finanzas);
@@ -2905,9 +3086,9 @@ function validarFinanzas(f){
   const listas = {
     ingresos: i => plata(i.monto) && dia(i.dia) && (i.meses == null || (Array.isArray(i.meses) && i.meses.every(m => Number.isInteger(m) && m >= 1 && m <= 12))),
     fijos: x => plata(x.monto) && dia(x.dia),
-    deudas: d => plata(d.saldo) && plata(d.cuota) && (d.tna == null || plata(d.tna)) && dia(d.dia) && (d.hasta == null || esMes(d.hasta))
+    deudas: d => plata(d.saldo) && plata(d.cuota) && (d.tna == null || plata(d.tna)) && dia(d.dia) && (d.hasta == null || esMes(d.hasta)) && (d.alta == null || esFecha(d.alta))
       && (d.plan == null || (esObj(d.plan) && Object.entries(d.plan).every(([m, n]) => esMes(m) && plata(n)))),
-    movimientos: m => esMes(m.mes) && typeof m.monto === "number" && Number.isFinite(m.monto),
+    movimientos: m => esMes(m.mes) && typeof m.monto === "number" && Number.isFinite(m.monto) && (m.alta == null || esFecha(m.alta)),
     colchon: c => plata(c.monto)
   };
   for(const [k, ok] of Object.entries(listas))
@@ -3492,7 +3673,8 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* cintura */ cinturaAltura, cambioCintura, metaCintura,
   /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos,
-  /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas };
+  /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas,
+  /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS };
 </script>
 </body>
 </html>

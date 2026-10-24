@@ -233,6 +233,24 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   Una deuda puede tener cuotas distintas algunos meses (`plan`): la primera de
   un préstamo, las compras en cuotas de la tarjeta.
 - **Los próximos 12 meses**: lo que sobra y cómo quedaría el colchón.
+- **A dónde vas**: frases con tus números que se actualizan solas: cuánto
+  falta o sobra este mes y desde cuándo cierran solos, qué deuda termina y
+  cuánto libera, cómo bajan las cuotas, la última cuota, cuándo llegás al
+  colchón, cómo vas con alimentos, los días sin deuda nueva y lo que falta
+  pagar. En Hoy aparece una tarjeta como la reflexión: una frase de finanzas a
+  la mañana y otra a la tarde (un mazo de 12, en rueda) y uno de tus datos, que
+  cambia cada día.
+- **Hábitos de finanzas**: cuatro hábitos para sumar a Hoy que se marcan solos
+  con lo que cargás, como *Caminar seguido* con los pasos. *Anotar lo que
+  gasto* queda verde el día que cargás un gasto de alimentos (si no gastaste,
+  lo marcás vos; a las 21 avisa). *Sin deuda nueva* es verde cada día y
+  amarillo el día que cargás una deuda o un adelanto marcado como deuda nueva.
+  *Alimentos al ritmo* es verde mientras lo gastado en el mes no se adelanta
+  más de una semana al presupuesto. *Vencimientos al día* es verde si no hay
+  nada vencido sin marcar como pagado (se mira cada día, el de hoy). Lo que
+  marcás vos manda y no se toca; lo que marcó la app queda en `marcasFin` y se
+  corrige si cambian los datos (un ticket de ayer, un pago marcado tarde). La
+  plata no tiene fin de semana: se miran todos los días.
 
 Se carga todo desde la app o de una vez con **Importar finanzas**: un `.json`
 con `{ "finanzas": { ... } }`, o un respaldo entero, del que toma solo las
@@ -281,7 +299,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                372 pruebas automatizadas (Playwright)
+├── test.mjs                396 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
