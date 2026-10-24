@@ -125,7 +125,7 @@ header{padding:calc(14px + env(safe-area-inset-top)) 0 8px}
 .more:active{background:var(--surface-2);border-color:var(--line)}
 
 /* ---------- notes ---------- */
-textarea,input[type=text],input[type=number],input[type=time]{
+textarea,input[type=text],input[type=number],input[type=time],input[type=date],input[type=month]{
   width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:13px;
   padding:11px 12px;color:var(--ink);font:inherit;font-size:15px;resize:vertical}
 textarea:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -198,8 +198,8 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in srgb,var(--surface) 88%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom)}
-.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(6,1fr)}
-.navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--muted)}
+.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(7,1fr)}
+.navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:10px;font-weight:600;color:var(--muted)}
 .navin button b{font-size:20px;line-height:1;font-weight:400}
 .navin button[aria-current=true]{color:var(--ink)}
 
@@ -266,6 +266,34 @@ tr.tap{cursor:pointer}
 .item input{padding:8px;font-size:14px;text-align:right}
 .item small{display:block;color:var(--muted);font-size:12px}
 details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
+
+/* ---------- finanzas ---------- */
+.cuentas{margin-top:12px}
+.cuentas button{display:flex;align-items:baseline;gap:10px;width:100%;padding:8px 0;border-bottom:1px solid var(--line);font-size:14.5px;text-align:left}
+.cuentas button span{flex:1}
+.cuentas button b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.cuentas button i{font-style:normal;color:var(--muted)}
+.fila{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.fila:last-child{border-bottom:none}
+.fila .ce{display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-align:left;padding:0}
+.fila .hm{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;min-width:40px;line-height:1.25}
+.fila .n{flex:1;min-width:0;line-height:1.3}
+.fila .n small{display:block;color:var(--muted);font-size:12px}
+.fila .n small.warn{color:var(--fail);font-weight:700}
+.fila b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.fila .x{color:var(--muted);font-size:17px;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none}
+.fila.pagado .n,.fila.pagado b{color:var(--muted)}
+.hito{display:flex;gap:10px;padding:7px 0;font-size:14px;border-bottom:1px solid var(--line)}
+.hito:last-child{border-bottom:none}
+.hito span{flex:1}
+.hito b{white-space:nowrap}
+.renglon{display:flex;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line);color:var(--ink-2)}
+.renglon span{flex:1;min-width:0}
+.renglon b{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.cab{display:flex;align-items:center;gap:2px}
+.cab span{flex:1}
+.cab button{width:30px;height:26px;border-radius:8px;font-size:17px;color:var(--ink-2);letter-spacing:0}
+.cab button:disabled{opacity:.3}
 </style>
 </head>
 <body>
@@ -287,6 +315,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
     <button data-tab="semana" aria-current="false"><b>◔</b>Semanas</button>
     <button data-tab="pasos"  aria-current="false"><b>▥</b>Pasos</button>
     <button data-tab="comida" aria-current="false"><b>◫</b>Comida</button>
+    <button data-tab="finanzas" aria-current="false"><b>$</b>Finanzas</button>
     <button data-tab="mas"    aria-current="false"><b>≡</b>Más</button>
   </div>
 </nav>
@@ -1167,6 +1196,139 @@ function loQueSeCocina(S){
     for(const st of Object.values(m)) if(st === ST.GREEN){ verdes++; if(!desde || d < desde) desde = d; }
   return { verdes, desde };
 }
+
+/* ---- finanzas ----
+   S.finanzas = {
+     inicio: "2026-11",               primer mes del plan: antes no se cuenta ni se avisa nada
+     presupuestoAlimentos: 600000,
+     ingresos:    [{ id, nombre, monto, dia?, meses? }]    meses: [6, 12] para el aguinaldo; sin meses, todos
+     fijos:       [{ id, nombre, monto, dia? }]            lo de la casa que se paga todos los meses
+     deudas:      [{ id, nombre, saldo, cuota, tna?, dia?, hasta?, plan? }]   plan: { "2026-11": 527360 } si una cuota es distinta
+     movimientos: [{ id, mes, nombre, monto }]             lo de un solo mes: + entra (un adelanto), − sale (su descuento)
+     colchon:     [{ id, nombre, monto }]                  lo ahorrado, hoy
+     gastos:      { "2026-11-02": [{ id, comercio, total, items?, origen, nota? }] }   alimentos
+     pagos:       { "2026-11": ["d:id", "f:id"] }          vencimientos del mes ya pagados
+   }
+   Todo en pesos; un mes es "AAAA-MM". Un sueldo cuenta para el mes que paga: el
+   que se cobra el 30 de octubre es plata de noviembre. */
+const PRESUPUESTO_ALIMENTOS = 600000;
+function mesDe(ds){ return ds.slice(0, 7); }
+function sumarMeses(mes, n){ const [y, m] = mes.split("-").map(Number); return iso(new Date(y, m - 1 + n, 1)).slice(0, 7); }
+/* El día de pago dentro del mes: el 31 en noviembre cae el 30 */
+function fechaDelMes(mes, dia){ const [y, m] = mes.split("-").map(Number); return iso(new Date(y, m - 1, Math.min(dia, daysInMonth(y, m - 1)))); }
+function cuotaDelMes(d, mes){ return d.hasta && mes > d.hasta ? 0 : d.plan?.[mes] ?? d.cuota ?? 0; }
+function ingresoDelMes(i, mes){ return !i.meses?.length || i.meses.includes(Number(mes.slice(5))) ? i.monto || 0 : 0; }
+function presupuestoAlimentos(F){ return F?.presupuestoAlimentos ?? PRESUPUESTO_ALIMENTOS; }
+const suma = (lista, f) => (lista || []).reduce((t, x) => t + (f(x) || 0), 0);
+/* Los gastos del mes en orden de fecha, con su día y su lugar en la lista de ese día */
+function gastosDelMes(gastos, mes){
+  return Object.keys(gastos || {}).filter(d => mesDe(d) === mes).sort()
+    .flatMap(d => gastos[d].map((g, i) => ({ g, fecha: d, i })));
+}
+function gastadoEnMes(gastos, mes){ return suma(gastosDelMes(gastos, mes), x => x.g.total); }
+function gastoMensual(F){ return suma(F?.fijos, f => f.monto) + presupuestoAlimentos(F); }
+function totalColchon(F){ return suma(F?.colchon, c => c.monto); }
+
+/* Lo que entra y lo que sale en un mes. Alimentos: en un mes pasado, lo gastado;
+   en este y en los que vienen, el presupuesto, o lo gastado si ya se pasó. */
+function resumenMes(F, mes, hoy){
+  const ingresos = (F?.ingresos || []).map(i => ({ nombre: i.nombre, monto: ingresoDelMes(i, mes) })).filter(i => i.monto);
+  const movimientos = (F?.movimientos || []).filter(m => m.mes === mes);
+  const presupuesto = presupuestoAlimentos(F), gastado = gastadoEnMes(F?.gastos, mes);
+  const casa = suma(F?.fijos, f => f.monto), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes));
+  const alimentos = mes < mesDe(hoy) ? gastado : Math.max(presupuesto, gastado);
+  const entra = suma(ingresos, i => i.monto) + suma(movimientos, m => Math.max(0, m.monto));
+  const otros = suma(movimientos, m => Math.max(0, -m.monto));
+  return { mes, entra, casa, alimentos, presupuesto, gastado, cuotas, otros, ingresos, movimientos,
+           sobra: entra - casa - alimentos - cuotas - otros };
+}
+/* Mes a mes desde `desde`: cuánto sobra y cómo queda el colchón si se guarda lo que sobra
+   (y si falta, sale de ahí) */
+function proyeccionFinanzas(F, desde, n, hoy){
+  let colchon = totalColchon(F);
+  return Array.from({ length: n }, (_, k) => {
+    const r = resumenMes(F, sumarMeses(desde, k), hoy);
+    colchon += r.sobra;
+    return { ...r, colchon };
+  });
+}
+/* Colchón de 1, 3 y 6 meses de gastos: si ya está, o en qué mes se llega (mirando hasta 3 años) */
+const HITOS_COLCHON = [1, 3, 6];
+function hitosColchon(F, desde, hoy){
+  const gasto = gastoMensual(F), hay = totalColchon(F), p = proyeccionFinanzas(F, desde, 36, hoy);
+  return HITOS_COLCHON.map(meses => {
+    const monto = meses * gasto;
+    return hay >= monto ? { meses, monto, ya: true } : { meses, monto, ya: false, mes: p.find(x => x.colchon >= monto)?.mes || null };
+  });
+}
+
+/* Lo que hay que pagar en el mes, por día: cuotas y gastos fijos. Los que no
+   tienen día van al final. */
+function vencimientos(F, mes){
+  const pagos = new Set(F?.pagos?.[mes] || []);
+  return [
+    ...(F?.deudas || []).map(d => ({ clave: "d:" + d.id, nombre: d.nombre, monto: cuotaDelMes(d, mes), dia: d.dia, tipo: "cuota" })),
+    ...(F?.fijos || []).map(f => ({ clave: "f:" + f.id, nombre: f.nombre, monto: f.monto || 0, dia: f.dia, tipo: "fijo" }))
+  ].filter(v => v.monto > 0)
+   .map(v => ({ ...v, fecha: v.dia ? fechaDelMes(mes, v.dia) : null, pagado: pagos.has(v.clave) }))
+   .sort((a, b) => (a.dia || 99) - (b.dia || 99));
+}
+/* Lo que vence ese día y todavía no se pagó. Antes del primer mes del plan, nada. */
+function vencenEl(F, ds){
+  const mes = mesDe(ds);
+  if(F?.inicio && mes < F.inicio) return [];
+  return vencimientos(F, mes).filter(v => v.fecha === ds && !v.pagado);
+}
+/* Aviso el día antes de cada vencimiento, a la hora elegida, con lo que todavía no
+   se pagó; los del mismo día van juntos. Hoy lleva su propio id por día. */
+function planAvisoVencimientos(F, ahora, dias, hora){
+  if(!F || !esHora(hora)) return [];
+  const [hh, mm] = hora.split(":").map(Number), out = [];
+  for(let i = 0; i < dias; i++){
+    const d = addDays(ahora, i), at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm);
+    if(at <= ahora) continue;
+    const v = vencenEl(F, iso(addDays(d, 1)));
+    if(!v.length) continue;
+    out.push({ id: 600000 + i, at, canal: "finanzas",
+               title: "Mañana vence " + (v.length === 1 ? v[0].nombre : `${v[0].nombre} y ${v.length === 2 ? "1 más" : v.length - 1 + " más"}`),
+               body: `$ ${suma(v, x => x.monto).toLocaleString("es-AR")} · Tocá para verlo` });
+  }
+  return out;
+}
+
+/* Lo que queda del presupuesto de alimentos, repartido en lo que falta del mes (hoy incluido) */
+function ritmoAlimentos(presupuesto, gastado, mes, hoy){
+  const quedan = presupuesto - gastado;
+  if(mes !== mesDe(hoy)) return { quedan, dias: 0, porSemana: 0 };
+  const [y, m] = mes.split("-").map(Number), dias = daysInMonth(y, m - 1) - parseISO(hoy).getDate() + 1;
+  return { quedan, dias, porSemana: quedan > 0 ? Math.round(quedan / dias * 7 / 100) * 100 : 0 };
+}
+/* Cuotas que faltan desde `mes` hasta la última, las dos incluidas */
+function cuotasQueFaltan(d, mes){
+  if(!d.hasta) return null;
+  const [y1, m1] = mes.split("-").map(Number), [y2, m2] = d.hasta.split("-").map(Number);
+  return Math.max(0, (y2 - y1) * 12 + m2 - m1 + 1);
+}
+/* Deudas que siguen en `mes`: lo que se debe y cuánto se va en intereses por mes
+   (sin IVA). Tasa 0 es sin interés; sin tasa, no se sabe y no se cuenta. */
+function resumenDeudas(F, mes){
+  const activas = (F?.deudas || []).filter(d => !d.hasta || d.hasta >= mes);
+  return { activas, saldo: suma(activas, d => d.saldo),
+           intereses: Math.round(suma(activas, d => d.tna ? d.saldo * d.tna / 1200 : 0)),
+           sinTasa: activas.filter(d => d.tna == null).length };
+}
+
+/* Lo que devuelve Claude de un ticket, a números confiables. Los descuentos
+   vienen como renglones negativos; si falta el total, es la suma de los renglones. */
+function normalizarTicket(r){
+  const plata = (x, min) => { const n = Number(x); return Number.isFinite(n) ? Math.max(min, Math.min(Math.round(n), 1e9)) : 0; };
+  const items = (Array.isArray(r?.items) ? r.items : []).filter(i => i && typeof i.nombre === "string" && i.nombre.trim())
+    .map(i => ({ nombre: i.nombre.trim().slice(0, 60), cantidad: Math.min(Math.max(Number(i.cantidad) || 1, 0), 1000), precio: plata(i.precio, -1e9) }));
+  const fecha = typeof r?.fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.fecha) && iso(parseISO(r.fecha)) === r.fecha ? r.fecha : "";
+  return { comercio: String(r?.comercio || "").trim().slice(0, 60), fecha, items,
+           total: plata(r?.total, 0) || Math.max(0, suma(items, i => i.precio)),
+           nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
+}
 /* @logica:fin */
 
 /* =========================================================================
@@ -1311,7 +1473,7 @@ function diaRelativo(ds){
 const view = document.getElementById("view");
 
 function render(){
-  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, mas:vMas })[TAB]();
+  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, finanzas:vFinanzas, mas:vMas })[TAB]();
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
   window.scrollTo(0,0);
@@ -1406,6 +1568,7 @@ function vHoy(){
   </div>
   ${alert}
   ${alertaComidasHTML()}
+  ${alertaVencimientosHTML()}
   ${pendHTML}
   ${avisosHTML()}
   ${reflexionHTML()}
@@ -1995,6 +2158,328 @@ function comidaAMano(fecha = TODAY){
   };
 }
 
+/* ---------- finanzas: el mes, vencimientos, alimentos, colchón y deudas ---------- */
+let FIN_MES = null, ALIM_MES = null;   // el mes de arriba y el de Alimentos; null = el que toca
+const HORA_AVISO_VENC = "10:00";       // el aviso del día antes de cada vencimiento
+function fin(){
+  const f = S.finanzas ||= {};
+  for(const k of ["ingresos", "fijos", "deudas", "movimientos", "colchon"]) f[k] ||= [];
+  f.gastos ||= {}; f.pagos ||= {};
+  return f;
+}
+function aPesos(n){ return (n < 0 ? "− $ " : "$ ") + fmt(Math.abs(Math.round(n))); }
+function conSigno(n){ return (n < 0 ? "− $ " : "+ $ ") + fmt(Math.abs(Math.round(n))); }
+function enMillones(n, signo){ return (n < 0 ? "−" : signo && n > 0 ? "+" : "") + (Math.abs(n) / 1e6).toLocaleString("es-AR", { maximumFractionDigits: 2 }); }
+function nombreMes(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES[m - 1]} ${y}`; }
+function mesCorto(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES_CORTOS[m - 1]} ${String(y).slice(2)}`; }
+function diaYMes(ds){ const d = parseISO(ds); return `${d.getDate()}/${d.getMonth() + 1}`; }
+const esFechaValida = x => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) && iso(parseISO(x)) === x;
+/* El mes que toca: el de hoy, o el primero del plan si todavía no empezó */
+function mesDelPlan(F){ const m = mesDe(TODAY); return F.inicio > m ? F.inicio : m; }
+
+function vFinanzas(){
+  const F = fin(), conPlan = F.ingresos.length + F.fijos.length + F.deudas.length > 0;
+  return alertaVencimientosHTML() + (conPlan ? mesFinHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML()) + alimentosHTML(F)
+    + (conPlan ? colchonHTML(F) + deudasHTML(F) + proximosHTML(F) : "") + datosFinHTML(conPlan);
+}
+function bienvenidaFinHTML(){
+  return `<div class="card"><div class="card-t">Tus finanzas</div>
+    <p style="font-size:14px;margin:0;line-height:1.5">Cargá lo que entra, lo de la casa y tus deudas: la app calcula cuánto te sobra cada mes,
+      te avisa el día antes de cada vencimiento y te dice cuándo llegás al colchón.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
+      <button class="btn" data-act="flista" data-k="ingresos" style="margin:0">Empezar a cargar</button>
+      <button class="btn ghost" data-act="fimport" style="margin:0">Importar finanzas</button></div></div>`;
+}
+/* El mes: lo que entra, lo que sale y lo que sobra o falta */
+function mesFinHTML(F){
+  const mes = FIN_MES || mesDelPlan(F), r = resumenMes(F, mes, TODAY), nombre = MESES[Number(mes.slice(5)) - 1];
+  const falta = suma(vencimientos(F, mes).filter(v => !v.pagado), v => v.monto);
+  const alim = mes === mesDe(TODAY) ? Math.max(0, r.presupuesto - r.gastado) : mes > mesDe(TODAY) ? r.presupuesto : 0;
+  const fila = (t, n, act, k) => `<button data-act="${act}"${k ? ` data-k="${k}"` : ""}><span>${t}</span><b>${conSigno(n)}</b><i>›</i></button>`;
+  return `<div class="mnav"><button data-act="fmes" data-n="-1" aria-label="Mes anterior"${F.inicio && mes <= F.inicio ? " disabled" : ""}>‹</button>
+      <b>${nombreMes(mes)}</b><button data-act="fmes" data-n="1" aria-label="Mes siguiente">›</button></div>
+    <div class="card fin-mes">${heroInner(aPesos(Math.abs(r.sobra)), `${r.sobra >= 0 ? "te sobran" : "te faltan"} en ${nombre}`)}
+    <div class="cuentas">
+      ${fila("Entra", suma(r.ingresos, i => i.monto), "flista", "ingresos")}
+      ${fila("Casa", -r.casa, "flista", "fijos")}
+      ${fila(r.gastado > r.presupuesto ? "Alimentos (te pasaste)" : "Alimentos", -r.alimentos, "fpres")}
+      ${fila("Cuotas", -r.cuotas, "flista", "deudas")}</div>
+    ${r.movimientos.length ? `<p class="frec-t">Solo en ${nombre}</p>${r.movimientos.map(m => `<div class="fila"><span class="n">${esc(m.nombre)}</span>
+      <b>${conSigno(m.monto)}</b><button class="x" data-act="fborrarMov" data-id="${m.id}" aria-label="Sacar ${esc(m.nombre)}">✕</button></div>`).join("")}` : ""}
+    <button class="linkbtn" data-act="fmov" data-m="${mes}">+ Algo de este mes: un adelanto, un descuento, un gasto extra</button>
+    <p class="pie">Falta pagar <b>${aPesos(falta)}</b> de cuotas y gastos${alim ? ` y ${aPesos(alim)} de alimentos` : ""}.${r.sobra < 0
+      ? " Para cubrir lo que falta: recortá, usá el colchón o, si no queda otra, un adelanto (cargalo como algo de este mes)." : ""}</p></div>`;
+}
+function vencimientosHTML(F){
+  const mes = FIN_MES || mesDelPlan(F), v = vencimientos(F, mes), manana = iso(addDays(parseISO(TODAY), 1));
+  if(!v.length) return "";
+  const fila = x => {
+    const estado = x.pagado ? "pagado" : !x.fecha ? "" : x.fecha < TODAY ? "venció" : x.fecha === TODAY ? "vence hoy" : x.fecha === manana ? "vence mañana" : "";
+    return `<div class="fila${x.pagado ? " pagado" : ""}"><span class="hm">${x.fecha ? diaYMes(x.fecha) : "—"}</span>
+      <span class="n">${esc(x.nombre)}${estado ? `<small${!x.pagado && x.fecha <= manana ? ' class="warn"' : ""}>${estado}</small>` : ""}</span>
+      <b>${aPesos(x.monto)}</b><button class="pq${x.pagado ? " ok" : ""}" data-act="fpagar" data-k="${x.clave}" data-m="${mes}" aria-pressed="${x.pagado}"
+        aria-label="${x.pagado ? "Desmarcar" : "Marcar pagado"}: ${esc(x.nombre)}">✓</button></div>`;
+  };
+  const conDia = v.filter(x => x.fecha), sinDia = v.filter(x => !x.fecha);
+  return `<div class="card venc"><div class="card-t">Vencimientos de ${MESES[Number(mes.slice(5)) - 1]} · ${v.filter(x => x.pagado).length} de ${v.length} pagados</div>
+    ${conDia.map(fila).join("")}${sinDia.length ? `<p class="frec-t">Sin fecha</p>${sinDia.map(fila).join("")}` : ""}
+    <p class="pie">Tocá ✓ cuando lo pagás. ${NATIVO ? `El día antes, a las ${HORA_AVISO_VENC}, te avisa lo que vence.`
+      : "La app de Android te avisa el día antes de cada vencimiento."}</p></div>`;
+}
+/* Lo que venció sin marcar, lo de hoy y lo de mañana: en Hoy y arriba de Finanzas */
+function alertaVencimientosHTML(){
+  const F = S.finanzas;
+  if(!F?.deudas?.length && !F?.fijos?.length) return "";
+  const mes = mesDe(TODAY), manana = iso(addDays(parseISO(TODAY), 1));
+  const vencidos = F.inicio > mes ? [] : vencimientos(F, mes).filter(v => v.fecha && v.fecha < TODAY && !v.pagado);
+  const lineas = [["Venció sin marcar", vencidos], ["Hoy vence", vencenEl(F, TODAY)], ["Mañana vence", vencenEl(F, manana)]]
+    .filter(([, l]) => l.length).map(([t, l]) => `<b>${t}:</b> ${esc(l.map(v => v.nombre).join(", "))} · ${aPesos(suma(l, v => v.monto))}`);
+  if(!lineas.length) return "";
+  return `<div class="alert risk alerta-venc"><span class="ic">$</span><div>${lineas.join("<br>")}
+    ${TAB === "finanzas" ? "" : `<br><button class="linkbtn" data-act="irFinanzas">Ir a Finanzas</button>`}</div></div>`;
+}
+function alimentosHTML(F){
+  const mes = ALIM_MES || mesDe(TODAY), lista = gastosDelMes(F.gastos, mes).reverse(), pres = presupuestoAlimentos(F);
+  const gastado = suma(lista, x => x.g.total), rit = ritmoAlimentos(pres, gastado, mes, TODAY), primero = Object.keys(F.gastos).sort()[0];
+  const antes = F.inicio > mes;   // antes del plan, lo gastado queda anotado pero no hay presupuesto
+  return `<div class="card alimentos"><div class="card-t cab"><span>Alimentos · ${nombreMes(mes)}</span>
+      <button data-act="amover" data-n="-1" aria-label="Mes anterior"${!primero || mesDe(primero) >= mes ? " disabled" : ""}>‹</button>
+      <button data-act="amover" data-n="1" aria-label="Mes siguiente"${mes >= mesDe(TODAY) ? " disabled" : ""}>›</button></div>
+    ${antes ? heroInner(aPesos(gastado), `en ${MESES[Number(mes.slice(5)) - 1]}; el presupuesto arranca en ${MESES[Number(F.inicio.slice(5)) - 1]}`)
+      : heroInner(aPesos(gastado), gastado <= pres ? `de ${aPesos(pres)} · quedan ${aPesos(pres - gastado)}` : `de ${aPesos(pres)} · te pasaste ${aPesos(gastado - pres)}`)
+        + barra(gastado, pres, gastado <= pres ? "var(--ok)" : "var(--fail)")}
+    ${!antes && rit.dias >= 7 && rit.quedan > 0 ? `<p class="ritmo" style="margin:12px 0 0;font-size:14.5px">Para los ${rit.dias} días que quedan: unos <b>${aPesos(rit.porSemana)} por semana</b>.</p>` : ""}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
+      <button class="btn" data-act="fticket" style="margin:0">Foto del ticket</button>
+      <button class="btn ghost" data-act="fgaleria" style="margin:0">Elegir foto</button></div>
+    <button class="btn ghost" data-act="fmano">Agregar a mano</button>
+    ${lista.length ? `<div style="margin-top:6px">${lista.map(filaGasto).join("")}</div>`
+      : `<p style="margin:12px 0 0;color:var(--muted);font-size:13.5px">${mes === mesDe(TODAY) ? "Todavía no cargaste gastos este mes." : "Ese mes no cargaste gastos."}</p>`}
+    <p class="pie">Presupuesto: ${aPesos(pres)} por mes. <button class="linkbtn" data-act="fpres" style="padding:0">Cambiar</button></p></div>`;
+}
+function filaGasto({ g, fecha, i }){
+  return `<div class="fila"><button class="ce" data-act="fgasto" data-d="${fecha}" data-i="${i}" aria-label="Ver ${esc(g.comercio)}">
+      <span class="hm">${diaYMes(fecha)}</span><span class="n">${esc(g.comercio)}${g.items?.length
+        ? `<small>${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket</small>` : ""}</span><b>${aPesos(g.total)}</b></button>
+    <button class="x" data-act="fborrarGasto" data-d="${fecha}" data-i="${i}" aria-label="Borrar ${esc(g.comercio)}">✕</button></div>`;
+}
+function colchonHTML(F){
+  const total = totalColchon(F), gasto = gastoMensual(F), meses = gasto ? Math.floor(total / gasto * 10) / 10 : 0;
+  return `<div class="card colchon"><div class="card-t">Colchón</div>
+    ${heroInner(aPesos(total), meses < 1 ? "menos de un mes de gastos" : `${fmt1(meses)} ${meses === 1 ? "mes" : "meses"} de gastos`)}
+    ${F.colchon.map(c => `<div class="fila"><button class="ce" data-act="fitem" data-k="colchon" data-id="${c.id}"><span class="n">${esc(c.nombre)}</span>
+      <b>${aPesos(c.monto)}</b></button></div>`).join("")}
+    <button class="linkbtn" data-act="fitem" data-k="colchon">+ Agregar lo que tenés guardado</button>
+    <p class="frec-t">Hitos</p>${hitosColchon(F, mesDelPlan(F), TODAY).map(h => `<div class="hito"><span>${h.meses} ${h.meses === 1 ? "mes" : "meses"} de gastos · ${aPesos(h.monto)}</span>
+      <b>${h.ya ? "✓ ya está" : h.mes ? "≈ " + nombreMes(h.mes) : "más de 3 años"}</b></div>`).join("")}
+    <p class="pie">Las fechas suponen que guardás lo que sobra cada mes; si un mes falta, sale del colchón.</p></div>`;
+}
+function deudasHTML(F){
+  const mes = mesDelPlan(F), r = resumenDeudas(F, mes), terminadas = F.deudas.length - r.activas.length;
+  const fila = d => {
+    const n = cuotasQueFaltan(d, mes);
+    const det = [d.tna === 0 ? "sin interés" : d.tna ? `TNA ${fmt1(d.tna)} %` : "", `cuota ${aPesos(cuotaDelMes(d, mes))}`,
+                 d.hasta ? `termina ${mesCorto(d.hasta)}${n ? ` (${n} ${n === 1 ? "cuota" : "cuotas"})` : ""}` : ""].filter(Boolean).join(" · ");
+    return `<div class="fila"><button class="ce" data-act="fitem" data-k="deudas" data-id="${d.id}"><span class="n">${esc(d.nombre)}<small>${det}</small></span>
+      <b>${aPesos(d.saldo)}</b></button></div>`;
+  };
+  return `<div class="card deudas"><div class="card-t">Deudas</div>
+    ${heroInner(aPesos(r.saldo), `en ${r.activas.length} ${r.activas.length === 1 ? "deuda" : "deudas"} · cuotas de ${MESES[Number(mes.slice(5)) - 1]}: ${aPesos(suma(r.activas, d => cuotaDelMes(d, mes)))}`)}
+    ${r.intereses ? `<p class="intereses" style="margin:12px 0 4px;font-size:14px">≈ <b>${aPesos(r.intereses)} por mes</b> se van en intereses, más IVA${r.sinTasa
+      ? ` (sin contar ${r.sinTasa === 1 ? "1 deuda" : r.sinTasa + " deudas"} sin la tasa cargada)` : ""}.</p>` : ""}
+    ${[...r.activas].sort((a, b) => (b.tna || 0) - (a.tna || 0) || b.saldo - a.saldo).map(fila).join("")}
+    <button class="linkbtn" data-act="fitem" data-k="deudas">+ Agregar una deuda</button>
+    <p class="pie">Arriba, la más cara. Lo que debés es el saldo que cargaste: actualizalo de vez en cuando con el del banco.${terminadas
+      ? ` ${terminadas === 1 ? "Hay 1 terminada" : `Hay ${terminadas} terminadas`}: <button class="linkbtn" data-act="flista" data-k="deudas" style="padding:0">ver todas</button>.` : ""}</p></div>`;
+}
+function proximosHTML(F){
+  const p = proyeccionFinanzas(F, mesDelPlan(F), 12, TODAY);
+  return `<div class="card"><details><summary>Los próximos 12 meses</summary><table class="tbl proximos" style="margin-top:8px">
+    <tr><th>Mes</th><th>Sobra</th><th>Colchón</th></tr>
+    ${p.map(x => `<tr class="tap" data-act="fir" data-m="${x.mes}"><td>${cap(mesCorto(x.mes))}</td>
+      <td class="${x.sobra < 0 ? "y" : ""}">${enMillones(x.sobra, true)}</td><td class="${x.colchon < 0 ? "y" : ""}">${enMillones(x.colchon)}</td></tr>`).join("")}
+    </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">En millones de pesos, con lo cargado hoy. Tocá un mes para verlo arriba.</p></details></div>`;
+}
+function datosFinHTML(conPlan){
+  const conClave = !!claveIA();
+  return `<div class="card"><div class="card-t">Tickets con Claude</div>
+    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto del ticket se manda a Claude Opus 5.5 (Anthropic), que lee el comercio, la fecha,
+      cada renglón y el total; antes de guardar podés corregirlo. La foto no se guarda en la app. Cuesta unos 2 a 4 centavos de dólar por ticket,
+      con la misma clave de Anthropic que Comida.</p>
+    <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
+    <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>
+  ${conPlan ? `<div class="card"><div class="card-t">Tus datos</div>
+    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">Quedan en este celular y viajan en el respaldo (Más → Exportar respaldo).</p>
+    <button class="btn ghost" data-act="fimport">Importar finanzas (.json)</button></div>` : ""}`;
+}
+
+/* ---- listas: lo que entra, la casa, las deudas y el colchón ---- */
+const LISTAS_FIN = {
+  ingresos: { titulo: "Lo que entra", nuevo: "Agregar un ingreso",
+    sub: "Por mes, lo que te queda en mano. El sueldo que cobrás a fin de mes cuenta para el mes siguiente: el del 30 de octubre es plata de noviembre.",
+    campos: [["nombre", "Nombre", "texto"], ["monto", "Monto por mes", "plata"], ["dia", "Día de cobro (opcional)", "dia"],
+             ["aguinaldo", "Solo en junio y diciembre (aguinaldo)", "check"]] },
+  fijos: { titulo: "Gastos de la casa", nuevo: "Agregar un gasto",
+    sub: "Lo que se paga todos los meses, sin alimentos (que tienen su presupuesto). Con día de pago entra en los vencimientos y te avisa el día antes.",
+    campos: [["nombre", "Qué es", "texto"], ["monto", "Monto por mes", "plata"], ["dia", "Día de pago (opcional)", "dia"]] },
+  deudas: { titulo: "Deudas", nuevo: "Agregar una deuda",
+    sub: "Préstamos y cuotas de la tarjeta. Lo que debés hoy es lo que pagarías para cancelarla; con la tasa se ve cuál es la más cara.",
+    campos: [["nombre", "Nombre", "texto"], ["saldo", "Lo que debés hoy", "plata"], ["cuota", "Cuota por mes", "plata"],
+             ["tna", "Tasa nominal anual (%, opcional)", "tasa"], ["dia", "Día de vencimiento", "dia"], ["hasta", "Última cuota", "mes"]] },
+  colchon: { titulo: "Colchón", nuevo: "Agregar ahorro",
+    sub: "Lo que tenés guardado, en pesos de hoy: la cuenta, los dólares, las inversiones.",
+    campos: [["nombre", "Dónde está", "texto"], ["monto", "Cuánto hay hoy", "plata"]] }
+};
+function detalleFin(tipo, x){
+  if(tipo === "ingresos") return [x.dia ? `cobra el ${x.dia}` : "", x.meses?.length ? "junio y diciembre" : ""].filter(Boolean).join(" · ");
+  if(tipo === "fijos") return x.dia ? `el ${x.dia}` : "sin fecha";
+  if(tipo === "deudas") return [`cuota ${aPesos(x.cuota)}`, x.dia ? `el ${x.dia}` : "", x.hasta ? `hasta ${mesCorto(x.hasta)}` : ""].filter(Boolean).join(" · ");
+  return "";
+}
+function verListaFin(tipo){
+  const L = LISTAS_FIN[tipo], lista = fin()[tipo], monto = x => tipo === "deudas" ? x.saldo : x.monto;
+  const total = suma(tipo === "ingresos" ? lista.filter(x => !x.meses?.length) : lista, monto);
+  sheet(`<h3>${L.titulo}</h3><p class="sub">${L.sub}</p>
+    ${lista.map(x => `<div class="fila"><button class="ce" data-id="${x.id}"><span class="n">${esc(x.nombre)}<small>${esc(detalleFin(tipo, x))}</small></span>
+      <b>${aPesos(monto(x))}</b></button></div>`).join("") || `<p style="color:var(--muted);font-size:13.5px;margin:0">Todavía no hay nada.</p>`}
+    ${lista.length > 1 ? `<p class="pie">Total: <b>${aPesos(total)}</b>${tipo === "deudas" ? ", lo que debés" : tipo === "colchon" ? "" : " por mes"}.</p>` : ""}
+    <div class="row2"><button class="btn ghost" data-x="c">Cerrar</button><button class="btn" data-x="a">${L.nuevo}</button></div>`);
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="a"]').onclick = () => editarItemFin(tipo, null, true);
+  modal.querySelectorAll("[data-id]").forEach(b => b.onclick = () => editarItemFin(tipo, b.dataset.id, true));
+}
+/* Alta y edición, con los campos de LISTAS_FIN. Con `volver`, al terminar vuelve a la lista. */
+function editarItemFin(tipo, id, volver){
+  const L = LISTAS_FIN[tipo], F = fin(), x = id ? F[tipo].find(y => y.id === id) : null;
+  if(id && !x) return;
+  const valor = k => k === "aguinaldo" ? !!x?.meses?.length : x?.[k] ?? "";
+  const campo = ([k, t, c]) => c === "check" ? `<label class="chk"><input type="checkbox" id="f_${k}"${valor(k) ? " checked" : ""}> ${t}</label>`
+    : `<label class="campo" for="f_${k}">${t}</label>` + (c === "texto" ? `<input type="text" id="f_${k}" maxlength="60" value="${esc(valor(k))}">`
+    : c === "mes" ? `<input type="month" id="f_${k}" value="${esc(valor(k))}">`
+    : `<input type="number" id="f_${k}" inputmode="${c === "tasa" ? "decimal" : "numeric"}" min="${c === "dia" ? 1 : 0}"${c === "dia" ? ' max="31"' : ""} step="${c === "tasa" ? "0.01" : "1"}" value="${esc(valor(k))}">`);
+  const plan = tipo === "deudas" && x?.plan ? Object.entries(x.plan).sort() : [];
+  sheet(`<h3>${x ? esc(x.nombre) : L.nuevo}</h3><p class="sub">${L.sub}</p>${L.campos.map(campo).join("")}
+    ${plan.length ? `<p class="detalle">Cuotas distintas: ${plan.map(([m, n]) => `${mesCorto(m)} ${aPesos(n)}`).join(" · ")}.</p>` : ""}
+    <div class="row2">${x ? `<button class="btn ghost danger" data-x="b">Borrar</button>` : `<button class="btn ghost" data-x="c">Cancelar</button>`}
+      <button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q), salir = () => volver ? verListaFin(tipo) : closeSheet();
+  if(x) $('[data-x="b"]').onclick = () => confirmSheet(`¿Borrar ${x.nombre}?`, "Se saca de tus finanzas.", "Borrar", () => {
+    F[tipo] = F[tipo].filter(y => y.id !== id); save(); render(); if(volver) verListaFin(tipo); });
+  else $('[data-x="c"]').onclick = salir;
+  $('[data-x="o"]').onclick = () => {
+    const nuevo = {};
+    for(const [k, t, c] of L.campos){
+      const el = $("#f_" + k), v = c === "check" ? el.checked : el.value.trim();
+      if(c === "texto"){ if(!v){ toast("Falta el nombre"); return; } nuevo[k] = v.slice(0, 60); }
+      else if(c === "plata"){ const n = Math.round(Number(v)); if(v === "" || !(n >= 0 && n <= 1e10)){ toast(`Revisá «${t}»`); return; } nuevo[k] = n; }
+      else if(c === "check"){ if(v) nuevo.meses = [6, 12]; }
+      else if(v === "") continue;
+      else if(c === "dia"){ const n = Number(v); if(!(Number.isInteger(n) && n >= 1 && n <= 31)){ toast("El día va del 1 al 31"); return; } nuevo[k] = n; }
+      else if(c === "tasa"){ const n = Number(v.replace(",", ".")); if(!(n >= 0 && n <= 1000)){ toast("La tasa va en porcentaje, por ejemplo 55"); return; } nuevo[k] = n; }
+      else if(c === "mes"){ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)){ toast("Elegí el mes de la última cuota"); return; } nuevo[k] = v; }
+    }
+    if(x){ for(const [k] of L.campos) delete x[k === "aguinaldo" ? "meses" : k]; Object.assign(x, nuevo); }
+    else F[tipo].push({ id: uid(), ...nuevo });
+    save(); render(); salir(); toast(x ? "Guardado" : "Agregado");
+  };
+  if(!x) $("#f_nombre").focus();
+}
+/* Algo de un solo mes: + entra, − sale */
+function nuevoMovimiento(mes){
+  sheet(`<h3>Solo en ${MESES[Number(mes.slice(5)) - 1]}</h3>
+    <p class="sub">Algo que pasa una vez: un adelanto de sueldo y su descuento, un saldo a favor, un gasto extra.</p>
+    <label class="campo" for="mNombre">Qué es</label><input type="text" id="mNombre" maxlength="60" placeholder="Ej.: adelanto de sueldo">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="mTipo">Entra o sale</label><select id="mTipo"><option value="1">Entra</option><option value="-1">Sale</option></select></div>
+      <div><label class="campo" for="mMonto">Monto</label><input type="number" id="mMonto" inputmode="numeric" min="0"></div></div>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $("#mNombre").focus();
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const nombre = $("#mNombre").value.trim(), n = Math.round(Number($("#mMonto").value));
+    if(!nombre || !(n > 0 && n <= 1e10)){ toast("Poné qué es y el monto"); return; }
+    fin().movimientos.push({ id: uid(), mes, nombre: nombre.slice(0, 60), monto: n * Number($("#mTipo").value) });
+    save(); closeSheet(); render(); toast("Agregado a " + MESES[Number(mes.slice(5)) - 1]);
+  };
+}
+function marcarPagado(mes, clave){
+  const F = fin(), l = F.pagos[mes] ||= [], i = l.indexOf(clave);
+  if(i >= 0) l.splice(i, 1); else l.push(clave);
+  if(!l.length) delete F.pagos[mes];
+  save(); render();
+}
+function editarPresupuesto(){
+  sheet(`<h3>Presupuesto de alimentos</h3><p class="sub">Lo que querés gastar por mes en comida: súper, verdulería, carnicería, delivery.</p>
+    <input type="number" id="presu" inputmode="numeric" min="0" step="1000" value="${presupuestoAlimentos(fin())}" aria-label="Presupuesto por mes">
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const inp = modal.querySelector("#presu"); inp.focus(); inp.select();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const n = Math.round(Number(inp.value));
+    if(inp.value === "" || !(n >= 0 && n <= 1e9)){ toast("Poné cuánto por mes"); return; }
+    fin().presupuestoAlimentos = n; save(); closeSheet(); render(); toast(`Presupuesto: ${aPesos(n)} por mes`);
+  };
+}
+
+/* ---- gastos de alimentos: a mano o desde la foto del ticket ---- */
+function guardarGasto(g, fecha){
+  (fin().gastos[fecha] ||= []).push({ id: uid(), ...g });
+  ALIM_MES = mesDe(fecha) === mesDe(TODAY) ? null : mesDe(fecha);
+  save(); render(); toast(`${g.comercio}: ${aPesos(g.total)} en alimentos`);
+}
+function gastoAMano(){
+  sheet(`<h3>Agregar a mano</h3>
+    <label class="campo" for="gNombre">Dónde o qué</label><input type="text" id="gNombre" maxlength="60" placeholder="Ej.: verdulería">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="gTotal">Cuánto</label><input type="number" id="gTotal" inputmode="numeric" min="0"></div>
+      <div><label class="campo" for="gFecha">Cuándo</label><input type="date" id="gFecha" max="${TODAY}" value="${TODAY}"></div></div>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $("#gNombre").focus();
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const comercio = $("#gNombre").value.trim(), total = Math.round(Number($("#gTotal").value)), fecha = $("#gFecha").value;
+    if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
+    if(!esFechaValida(fecha) || fecha > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    closeSheet(); guardarGasto({ comercio: comercio.slice(0, 60), total, origen: "mano" }, fecha);
+  };
+}
+function renglonesTicket(items){
+  if(!items?.length) return "";
+  return `<p class="frec-t">Lo que dice el ticket</p>${items.map(it => `<div class="renglon"><span>${esc(it.nombre)}${it.cantidad !== 1
+    ? ` <small style="color:var(--muted)">× ${fmt1(it.cantidad)}</small>` : ""}</span><b>${aPesos(it.precio)}</b></div>`).join("")}`;
+}
+function editarGasto(fecha, i){
+  const F = fin(), g = F.gastos[fecha]?.[i]; if(!g) return;
+  sheet(`<h3>${esc(g.comercio)}</h3><p class="sub">${cap(fechaCorta(fecha))}${g.origen === "ticket" ? " · leído de la foto del ticket" : ""}</p>
+    <label class="campo" for="eComercio">Dónde o qué</label><input type="text" id="eComercio" maxlength="60" value="${esc(g.comercio)}">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="eTotal">Total</label><input type="number" id="eTotal" inputmode="numeric" min="0" value="${g.total}"></div>
+      <div><label class="campo" for="eFecha">Cuándo</label><input type="date" id="eFecha" max="${TODAY}" value="${fecha}"></div></div>
+    ${renglonesTicket(g.items)}${g.nota ? `<p class="detalle">${esc(g.nota)}</p>` : ""}
+    <div class="row2"><button class="btn ghost danger" data-x="b">Borrar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $('[data-x="b"]').onclick = () => confirmarBorradoGasto(fecha, i);
+  $('[data-x="o"]').onclick = () => {
+    const comercio = $("#eComercio").value.trim(), total = Math.round(Number($("#eTotal").value)), nueva = $("#eFecha").value;
+    if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
+    if(!esFechaValida(nueva) || nueva > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    Object.assign(g, { comercio: comercio.slice(0, 60), total });
+    if(nueva !== fecha){ borrarGasto(fecha, i); (F.gastos[nueva] ||= []).push(g); }
+    save(); closeSheet(); render(); toast("Gasto actualizado");
+  };
+}
+function borrarGasto(fecha, i){
+  const F = fin(), l = F.gastos[fecha]; if(!l?.[i]) return;
+  l.splice(i, 1);
+  if(!l.length) delete F.gastos[fecha];
+}
+function confirmarBorradoGasto(fecha, i){
+  const g = fin().gastos[fecha]?.[i]; if(!g) return;
+  confirmSheet("¿Borrar este gasto?", `${g.comercio} · ${aPesos(g.total)}`, "Borrar", () => { borrarGasto(fecha, i); save(); render(); });
+}
+
 /* ---------- MÁS ---------- */
 function vMas(){
   const {y,m} = cursor, dim = daysInMonth(y,m), hs = habitsSorted();
@@ -2184,6 +2669,25 @@ function onAct(e){
     case "cfrecs": verFrecuentes(); break;
     case "caviso": editarAvisoComidas(); break;
     case "irComida": TAB = "comida"; render(); break;
+    case "irFinanzas": TAB = "finanzas"; render(); break;
+    case "fmes": {
+      const F = fin(), m = sumarMeses(FIN_MES || mesDelPlan(F), +el.dataset.n);
+      FIN_MES = F.inicio && m < F.inicio ? F.inicio : m; render(); break;
+    }
+    case "fir": FIN_MES = el.dataset.m; render(); break;
+    case "amover": { const m = sumarMeses(ALIM_MES || mesDe(TODAY), +el.dataset.n); ALIM_MES = m >= mesDe(TODAY) ? null : m; render(); break; }
+    case "fpagar": marcarPagado(el.dataset.m, el.dataset.k); break;
+    case "fticket": elegirFoto(true, [], "", FOTO_TICKET); break;
+    case "fgaleria": elegirFoto(false, [], "", FOTO_TICKET); break;
+    case "fmano": gastoAMano(); break;
+    case "fgasto": editarGasto(el.dataset.d, +el.dataset.i); break;
+    case "fborrarGasto": confirmarBorradoGasto(el.dataset.d, +el.dataset.i); break;
+    case "fpres": editarPresupuesto(); break;
+    case "flista": verListaFin(el.dataset.k); break;
+    case "fitem": editarItemFin(el.dataset.k, el.dataset.id || null); break;
+    case "fmov": nuevoMovimiento(el.dataset.m); break;
+    case "fborrarMov": { const F = fin(); F.movimientos = F.movimientos.filter(m => m.id !== el.dataset.id); save(); render(); toast("Sacado"); break; }
+    case "fimport": doImportFinanzas(); break;
     case "up": {
       const hs = habitsSorted(), i = hs.findIndex(h => h.id === hid);
       if(i > 0){ const a1 = hs[i].order ?? i, b1 = hs[i-1].order ?? (i-1); hs[i].order = b1; hs[i-1].order = a1; save(); render(); }
@@ -2383,9 +2887,70 @@ function prepararRespaldo(texto){
     throw new Error(`El campo "autoClosed" está roto.`);
   if(data.settings?.lastClosed != null && !esFecha(data.settings.lastClosed))
     throw new Error("La fecha del último cierre está rota.");
+  if(data.finanzas != null) validarFinanzas(data.finanzas);
   migrate(data);
   migrateV2(data, TODAY);
   return data;
+}
+
+/* Las finanzas, enteras, antes de tocar nada; tira un Error con el motivo */
+function validarFinanzas(f){
+  const esObj = x => x !== null && typeof x === "object" && !Array.isArray(x);
+  const esFecha = x => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
+  const esMes = x => typeof x === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(x);
+  const plata = x => typeof x === "number" && Number.isFinite(x) && x >= 0;
+  const texto = x => typeof x === "string" && x.trim().length > 0;
+  const dia = x => x == null || (Number.isInteger(x) && x >= 1 && x <= 31);
+  if(!esObj(f)) throw new Error(`El campo "finanzas" está roto.`);
+  const listas = {
+    ingresos: i => plata(i.monto) && dia(i.dia) && (i.meses == null || (Array.isArray(i.meses) && i.meses.every(m => Number.isInteger(m) && m >= 1 && m <= 12))),
+    fijos: x => plata(x.monto) && dia(x.dia),
+    deudas: d => plata(d.saldo) && plata(d.cuota) && (d.tna == null || plata(d.tna)) && dia(d.dia) && (d.hasta == null || esMes(d.hasta))
+      && (d.plan == null || (esObj(d.plan) && Object.entries(d.plan).every(([m, n]) => esMes(m) && plata(n)))),
+    movimientos: m => esMes(m.mes) && typeof m.monto === "number" && Number.isFinite(m.monto),
+    colchon: c => plata(c.monto)
+  };
+  for(const [k, ok] of Object.entries(listas))
+    if(f[k] != null && !(Array.isArray(f[k]) && f[k].every(x => esObj(x) && typeof x.id === "string" && /^[\w-]+$/.test(x.id) && texto(x.nombre) && ok(x))))
+      throw new Error(`En finanzas, "${k}" está roto.`);
+  if(f.gastos != null && !(esObj(f.gastos) && Object.entries(f.gastos).every(([d, l]) => esFecha(d) && Array.isArray(l)
+      && l.every(g => esObj(g) && typeof g.comercio === "string" && plata(g.total) && (g.items == null || Array.isArray(g.items))))))
+    throw new Error(`En finanzas, "gastos" está roto.`);
+  if(f.pagos != null && !(esObj(f.pagos) && Object.entries(f.pagos).every(([m, l]) => esMes(m) && Array.isArray(l) && l.every(x => typeof x === "string"))))
+    throw new Error(`En finanzas, "pagos" está roto.`);
+  if(f.inicio != null && !esMes(f.inicio)) throw new Error("En finanzas, el mes de inicio está roto.");
+  if(f.presupuestoAlimentos != null && !plata(f.presupuestoAlimentos)) throw new Error("En finanzas, el presupuesto de alimentos está roto.");
+}
+/* Solo las finanzas, de un respaldo entero o de un archivo que trae { finanzas }:
+   reemplaza lo que trae; lo que no trae (por ejemplo, los gastos de alimentos) queda. */
+function doImportFinanzas(){
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "application/json,.json";
+  inp.onchange = () => {
+    const f = inp.files[0]; if(!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      let nuevo;
+      try{
+        let data; try{ data = JSON.parse(String(r.result)); }catch(e){ throw new Error("No es un archivo JSON."); }
+        nuevo = data?.finanzas;
+        if(nuevo == null) throw new Error("No trae finanzas.");
+        validarFinanzas(nuevo);
+      }catch(e){ toast("Archivo inválido: " + e.message); return; }
+      const n = k => nuevo[k]?.length || 0, cuantos = (x, uno, varios) => `${x} ${x === 1 ? uno : varios}`;
+      confirmSheet("¿Reemplazar tus finanzas?",
+        `Trae ${cuantos(n("ingresos"), "ingreso", "ingresos")}, ${cuantos(n("fijos"), "gasto de la casa", "gastos de la casa")}, `
+        + `${cuantos(n("deudas"), "deuda", "deudas")}, ${cuantos(n("movimientos"), "movimiento", "movimientos")} y ${cuantos(n("colchon"), "ahorro", "ahorros")}`
+        + `${nuevo.inicio ? `, desde ${nombreMes(nuevo.inicio)}` : ""}. Reemplaza eso en este celular; `
+        + (nuevo.gastos ? "también los gastos de alimentos." : "tus gastos de alimentos quedan como están.") + " Hábitos y comidas no se tocan.",
+        "Reemplazar", () => {
+          S.finanzas = { ...fin(), ...nuevo }; fin(); FIN_MES = ALIM_MES = null;
+          save(); TAB = "finanzas"; render(); toast("Finanzas importadas");
+        });
+    };
+    r.readAsText(f);
+  };
+  inp.click();
 }
 
 function doImport(){
@@ -2568,12 +3133,15 @@ async function programarAvisos(){
                                                           importance: 4, visibility: 1, vibration: true });
     await nativo("LocalNotifications", "createChannel", { id: "comidas", name: "Comidas", description: "Aviso si falta cargar alguna comida",
                                                           importance: 4, visibility: 1, vibration: true });
+    await nativo("LocalNotifications", "createChannel", { id: "finanzas", name: "Vencimientos", description: "Aviso el día antes de cada vencimiento",
+                                                          importance: 4, visibility: 1, vibration: true });
     const { notifications: viejos = [] } = await nativo("LocalNotifications", "getPending");
     if(viejos.length) await nativo("LocalNotifications", "cancel", { notifications: viejos.map(n => ({ id: n.id })) });
     const hechos = new Set(S.habits.filter(h => getMark(TODAY, h.id)).map(h => h.id));
     const ahora = new Date(), hora = avisoComidasHora();
     const plan = [...planAvisos(S.habits, ahora, 14, hechos),
-                  ...(hora && usaComidas() ? planAvisoComidas(S.comidas, ahora, 14, hora) : [])].sort((a, b) => a.at - b.at);
+                  ...(hora && usaComidas() ? planAvisoComidas(S.comidas, ahora, 14, hora) : []),
+                  ...planAvisoVencimientos(S.finanzas, ahora, 14, HORA_AVISO_VENC)].sort((a, b) => a.at - b.at);
     if(plan.length) await nativo("LocalNotifications", "schedule", { notifications: plan.map(a => ({
       id: a.id, title: a.title, body: a.body, channelId: a.canal || "habitos", autoCancel: true,
       schedule: { at: a.at.toISOString(), allowWhileIdle: true } })) });
@@ -2663,17 +3231,18 @@ function caminando(){ return S.habits.find(h => h.auto?.source === "steps")?.nam
 sincronizarPasos();
 
 /* =========================================================================
-   9. COMIDA CON CLAUDE: foto o texto → calorías y proteína
+   9. CLAUDE: comida (foto o texto → calorías y proteína) y tickets de compra
    -------------------------------------------------------------------------
-   La foto (achicada a 1024 px), o lo escrito en "Agregar a mano" sin
-   calorías, va a Claude Opus 5.5 por el SDK oficial de Anthropic, empaquetado
+   La foto de la comida (achicada a 1024 px), lo escrito en "Agregar a mano"
+   sin calorías, o la foto del ticket (a 2048 px, para que se lea la letra
+   chica) va a Claude Opus 5.5 por el SDK oficial de Anthropic, empaquetado
    en vendor/anthropic-sdk.js (npm run vendor) y cargado recién la primera vez
    que se usa. La respuesta viene con un JSON
    schema fijo; si Claude no puede, el fallback del servidor reintenta con otro
    modelo. La clave es de la persona, vive solo en este celular y NO va en el
    respaldo (por eso no está en S).
    ========================================================================= */
-const CLAVE_IA = "miPrime.claveIA", MODELO_COMIDA = "claude-opus-5-5";
+const CLAVE_IA = "miPrime.claveIA", MODELO_IA = "claude-opus-5-5";
 const PROMPT_COMIDA = `Sos nutricionista y estimás calorías y proteínas de comidas a partir de una foto o de lo que la persona escribe, para alguien en Argentina que quiere bajar de peso sin perder músculo.
 - Identificá cada alimento o bebida. Con foto, estimá la porción con sus referencias (plato, cubiertos, manos, envases). Con texto, usá la cantidad que dice o, si no la dice, una porción típica en Argentina. Escribí la porción en gramos o en medidas caseras.
 - Calculá las kcal y los gramos de proteína de esa porción con valores de tablas nutricionales estándar. Sumá lo que no se ve pero suele llevar (aceite de cocción, manteca, aderezos) como estimación razonable y aclaralo en la nota.
@@ -2714,11 +3283,12 @@ function editarClave(){
   };
 }
 
-/* Cámara (capture) o galería, hasta 4 fotos de la misma comida: la primera abre
-   la hoja y desde ahí se suman las otras. En la app de Android, Capacitor abre la
-   cámara del celular; la galería deja elegir varias a la vez. */
+/* Cámara (capture) o galería, hasta 4 fotos de la misma comida o del mismo ticket:
+   la primera abre la hoja y desde ahí se suman las otras. En la app de Android,
+   Capacitor abre la cámara del celular; la galería deja elegir varias a la vez.
+   `modo` dice qué se fotografía (FOTO_COMIDA o FOTO_TICKET). */
 const MAX_FOTOS = 4;
-function elegirFoto(camara, previas = [], aclaracion = ""){
+function elegirFoto(camara, previas = [], aclaracion = "", modo = FOTO_COMIDA){
   if(!claveIA()){ editarClave(); return; }
   const lugar = MAX_FOTOS - previas.length; if(lugar <= 0) return;
   const inp = document.createElement("input");
@@ -2728,44 +3298,44 @@ function elegirFoto(camara, previas = [], aclaracion = ""){
   inp.onchange = async () => {
     const archivos = [...inp.files]; if(!archivos.length) return;
     if(archivos.length > lugar) toast(`Hasta ${MAX_FOTOS} fotos: entran ${lugar === 1 ? "1 más" : lugar + " más"}`);
-    try{ prepararFoto([...previas, ...await Promise.all(archivos.slice(0, lugar).map(achicarFoto))], aclaracion); }
+    try{ prepararFoto([...previas, ...await Promise.all(archivos.slice(0, lugar).map(a => achicarFoto(a, modo.lado)))], aclaracion, modo); }
     catch(e){ toast("No se pudo abrir la foto"); }
   };
   inp.click();
 }
-/* A 1024 px de lado y JPEG: menos tokens, menos costo, sube rápido */
-async function achicarFoto(archivo){
+/* JPEG y con el lado más largo a `lado` px: menos tokens, menos costo, sube rápido */
+async function achicarFoto(archivo, lado = 1024){
   const img = await createImageBitmap(archivo);
-  const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+  const k = Math.min(1, lado / Math.max(img.width, img.height));
   const c = document.createElement("canvas");
   c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
   const dataUrl = c.toDataURL("image/jpeg", 0.8);
   return { dataUrl, base64: dataUrl.split(",")[1] };
 }
-function prepararFoto(fotos, aclaracion = ""){
+function prepararFoto(fotos, aclaracion = "", modo = FOTO_COMIDA){
   const n = fotos.length;
-  sheet(`<h3>¿Qué comés?</h3>
-    <div class="fotos${n === 1 ? " una" : ""}">${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Foto ${i + 1} de tu comida">
+  sheet(`<h3>${modo.titulo}</h3>
+    <div class="fotos${n === 1 ? " una" : ""}">${fotos.map((f, i) => `<figure><img src="${f.dataUrl}" alt="Foto ${i + 1} ${modo.de}">
       <button class="x" data-q="${i}" aria-label="Sacar la foto ${i + 1}">✕</button></figure>`).join("")}</div>
-    ${n < MAX_FOTOS ? `<p class="pie" style="margin:4px 0 0">Podés sumar ${MAX_FOTOS - n === 1 ? "1 foto más" : `hasta ${MAX_FOTOS - n} fotos más`} de la misma comida: otro plato, otro ángulo, la etiqueta.</p>
+    ${n < MAX_FOTOS ? `<p class="pie" style="margin:4px 0 0">Podés sumar ${MAX_FOTOS - n === 1 ? "1 foto más" : `hasta ${MAX_FOTOS - n} fotos más`} ${modo.sumar}.</p>
       <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:8px">
         <button class="btn ghost" data-x="mc" style="margin:0">+ Sacar otra</button><button class="btn ghost" data-x="mg" style="margin:0">+ Elegir otra</button></div>` : ""}
     <label class="campo">Aclaración (opcional)</label>
-    <input type="text" id="aclara" maxlength="120" placeholder="Ej.: son 2 empanadas, la gaseosa es light" value="${esc(aclaracion)}">
+    <input type="text" id="aclara" maxlength="120" placeholder="${modo.ejemplo}" value="${esc(aclaracion)}">
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Analizar${n > 1 ? ` ${n} fotos` : ""}</button></div>`);
   const texto = () => modal.querySelector("#aclara").value.trim();
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
-  modal.querySelector('[data-x="mc"]')?.addEventListener("click", () => elegirFoto(true, fotos, texto()));
-  modal.querySelector('[data-x="mg"]')?.addEventListener("click", () => elegirFoto(false, fotos, texto()));
+  modal.querySelector('[data-x="mc"]')?.addEventListener("click", () => elegirFoto(true, fotos, texto(), modo));
+  modal.querySelector('[data-x="mg"]')?.addEventListener("click", () => elegirFoto(false, fotos, texto(), modo));
   modal.querySelectorAll("[data-q]").forEach(b => b.onclick = () => {
     const resto = fotos.filter((_, i) => i !== +b.dataset.q);
-    if(resto.length) prepararFoto(resto, texto()); else closeSheet();
+    if(resto.length) prepararFoto(resto, texto(), modo); else closeSheet();
   });
   modal.querySelector('[data-x="o"]').onclick = async e => {
     const boton = e.currentTarget;
     boton.disabled = true; boton.textContent = "Analizando…";
-    try{ mostrarAnalisis(await analizarComida(fotos.map(f => f.base64), texto())); }
+    try{ modo.mostrar(await modo.analizar(fotos.map(f => f.base64), texto())); }
     catch(err){ boton.disabled = false; boton.textContent = "Reintentar"; toast(mensajeErrorIA(err)); }
   };
 }
@@ -2780,32 +3350,36 @@ function cargarSDK(){
     document.head.appendChild(s);
   });
 }
-/* Con fotos (base64, hasta 4), el texto es una aclaración; sin fotos, es la descripción de lo que comió */
-async function analizarComida(fotos, texto){
-  const n = fotos?.length || 0;
+/* Un pedido a Claude con respuesta en el JSON schema dado; devuelve el JSON ya leído */
+async function preguntarAClaude(system, esquema, content){
   const { Anthropic, betaJSONSchemaOutputFormat } = await cargarSDK();
   const client = new Anthropic({ apiKey: claveIA(), dangerouslyAllowBrowser: true, timeout: 120000, maxRetries: 1 });
   const msg = await client.beta.messages.parse({
-    model: MODELO_COMIDA,
+    model: MODELO_IA,
     max_tokens: 16000,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-    system: PROMPT_COMIDA,
-    output_config: { format: betaJSONSchemaOutputFormat(ESQUEMA_COMIDA) },
-    messages: [{ role: "user", content: n ? [
-      ...fotos.map(data => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } })),
-      { type: "text", text: (n > 1 ? `Son ${n} fotos de la misma comida. ` : "")
-          + (texto ? `Aclaración: ${texto}` : "Estimá las calorías y proteínas de esta comida.") }]
-      : [{ type: "text", text: `Comí: ${texto}\nEstimá las calorías y proteínas.` }] }]
+    system,
+    output_config: { format: betaJSONSchemaOutputFormat(esquema) },
+    messages: [{ role: "user", content }]
   });
   if(msg.stop_reason === "refusal") throw new Error("rechazo");
   if(!msg.parsed_output) throw new Error("sin-respuesta");
-  return normalizarAnalisis(msg.parsed_output);
+  return msg.parsed_output;
+}
+const imagenes = fotos => fotos.map(data => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data } }));
+/* Con fotos (base64, hasta 4), el texto es una aclaración; sin fotos, es la descripción de lo que comió */
+async function analizarComida(fotos, texto){
+  const n = fotos?.length || 0;
+  return normalizarAnalisis(await preguntarAClaude(PROMPT_COMIDA, ESQUEMA_COMIDA, n ? [...imagenes(fotos),
+      { type: "text", text: (n > 1 ? `Son ${n} fotos de la misma comida. ` : "")
+          + (texto ? `Aclaración: ${texto}` : "Estimá las calorías y proteínas de esta comida.") }]
+    : [{ type: "text", text: `Comí: ${texto}\nEstimá las calorías y proteínas.` }]));
 }
 function mensajeErrorIA(e){
   const A = window.AnthropicSDK?.Anthropic;
   if(e?.message === "sin-sdk") return "No se pudo cargar Claude: revisá la conexión";
-  if(e?.message === "rechazo") return "Claude no pudo analizar esa comida";
+  if(e?.message === "rechazo") return "Claude no pudo analizar esa foto";
   if(e?.message === "sin-respuesta") return "Claude respondió algo que no se pudo leer: probá de nuevo";
   if(A){
     if(e instanceof A.AuthenticationError) return "La clave de Anthropic no es válida";
@@ -2848,6 +3422,68 @@ function mostrarAnalisis(r, { origen = "foto", nombre, fecha = TODAY, tipo, frec
   });
 }
 
+/* ---- tickets de compra: comercio, fecha, renglones y total ---- */
+const PROMPT_TICKET = `Leés tickets y facturas de compra de Argentina (supermercado, almacén, verdulería, carnicería, delivery) para llevar el control de lo que se gasta en alimentos.
+- Pasá cada renglón a un ítem: nombre corto y claro en castellano, sin códigos; cantidad (unidades o kilos; 1 si no dice) y precio, que es lo que se pagó por ese renglón en pesos.
+- Los descuentos y promociones van como ítems con precio negativo.
+- total: lo que se pagó al final, después de los descuentos. Si el ticket no lo muestra, sumá los renglones.
+- comercio: el nombre del negocio como aparece (por ejemplo "Coto", "Carrefour Market", "Verdulería Don José"); vacío si no se lee.
+- fecha: la del ticket, como AAAA-MM-DD; vacía si no se lee.
+- Los importes argentinos llevan punto en los miles y coma en los decimales: $ 12.345,67 son doce mil trescientos cuarenta y cinco pesos con 67 centavos.
+- Si hay varias fotos, son partes del mismo ticket: no repitas los renglones que aparecen en dos.
+- Si la persona escribe una aclaración, manda sobre lo que se ve.
+- En la nota, avisá si algo no se leyó bien y si hay productos que no son alimentos (limpieza, perfumería) y cuánto suman.
+- Si no es un ticket o no se lee, devolvé items vacíos y total 0, y explicalo en la nota.
+- confianza: "alta" si se lee todo; "baja" si hay partes borrosas o cortadas.`;
+const ESQUEMA_TICKET = {
+  type: "object",
+  properties: {
+    comercio: { type: "string" },
+    fecha: { type: "string" },
+    items: { type: "array", items: { type: "object", properties: {
+      nombre: { type: "string" }, cantidad: { type: "number" }, precio: { type: "number" } },
+      required: ["nombre", "cantidad", "precio"], additionalProperties: false } },
+    total: { type: "number" },
+    nota: { type: "string" },
+    confianza: { type: "string", enum: ["alta", "media", "baja"] }
+  },
+  required: ["comercio", "fecha", "items", "total", "nota", "confianza"], additionalProperties: false
+};
+async function analizarTicket(fotos, texto){
+  const n = fotos.length;
+  return normalizarTicket(await preguntarAClaude(PROMPT_TICKET, ESQUEMA_TICKET, [...imagenes(fotos),
+    { type: "text", text: (n > 1 ? `Son ${n} fotos del mismo ticket. ` : "") + (texto ? `Aclaración: ${texto}` : "Leé este ticket de compra.") }]));
+}
+/* Lo que leyó Claude, para corregir antes de guardar: el total es lo que cuenta en Alimentos */
+function mostrarTicket(r){
+  const fecha = r.fecha && r.fecha <= TODAY ? r.fecha : TODAY, hay = r.items.length > 0 || r.total > 0;
+  sheet(`<h3>Lo que leyó Claude</h3>
+    <p class="sub">Confianza ${esc(r.confianza)}. Corregí lo que haga falta: el total es lo que suma en Alimentos.</p>
+    ${hay ? `<label class="campo" for="tComercio">Dónde</label><input type="text" id="tComercio" maxlength="60" value="${esc(r.comercio)}" placeholder="Ej.: Coto">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="tTotal">Total</label><input type="number" id="tTotal" inputmode="numeric" min="0" value="${r.total}"></div>
+      <div><label class="campo" for="tFecha">Cuándo</label><input type="date" id="tFecha" max="${TODAY}" value="${fecha}"></div></div>
+    ${renglonesTicket(r.items)}` : ""}
+    ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
+    <div class="row2"><button class="btn ghost" data-x="c">Descartar</button>${hay ? `<button class="btn" data-x="o">Guardar</button>` : ""}</div>`);
+  const $ = q => modal.querySelector(q);
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]')?.addEventListener("click", () => {
+    const total = Math.round(Number($("#tTotal").value)), dia = $("#tFecha").value;
+    if(!(total > 0 && total <= 1e9)){ toast("Poné el total del ticket"); return; }
+    if(!esFechaValida(dia) || dia > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    const g = { comercio: ($("#tComercio").value.trim() || "Ticket").slice(0, 60), total, origen: "ticket" };
+    if(r.items.length) g.items = r.items;
+    if(r.nota) g.nota = r.nota;
+    closeSheet(); guardarGasto(g, dia);
+  });
+}
+/* Qué se fotografía: la hoja de las fotos, cuánto se achican, a quién se le pregunta y qué se muestra */
+const FOTO_COMIDA = { titulo: "¿Qué comés?", de: "de tu comida", lado: 1024, sumar: "de la misma comida: otro plato, otro ángulo, la etiqueta",
+                      ejemplo: "Ej.: son 2 empanadas, la gaseosa es light", analizar: analizarComida, mostrar: r => mostrarAnalisis(r) };
+const FOTO_TICKET = { titulo: "Ticket de compra", de: "del ticket", lado: 2048, sumar: "del mismo ticket: si es largo, sacalo en partes",
+                      ejemplo: "Ej.: el detergente no es comida", analizar: analizarTicket, mostrar: mostrarTicket };
+
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
   /* v2 */ migrateV2, stats, statsMes, prevDay, atRisk, prepararRespaldo, esLibre, esFeriado, esAhora, pendientes, porHora, generarICS, planAvisos, FERIADOS_AR, evaluarProgresion, setValor, originOf, markAutoClosed, markManual, parseSamsungSteps, planStepImport, applyStepImport, ORIGIN,
@@ -2855,7 +3491,8 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* reflexión */ fraseDelDia, loQueSeCocina, REFLEXIONES,
   /* cintura */ cinturaAltura, cambioCintura, metaCintura,
   /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
-  /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos };
+  /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos,
+  /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas };
 </script>
 </body>
 </html>

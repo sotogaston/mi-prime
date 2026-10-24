@@ -204,7 +204,46 @@ analizar la primera foto.
 
 ---
 
-## Las seis pantallas
+## Finanzas
+
+La pestaña **Finanzas** lleva la plata del mes con la misma idea que los
+hábitos: cargás lo que pasa y la app hace las cuentas.
+
+- **El mes** (arriba, con ‹ › para ver otros): lo que entra, la casa, alimentos
+  y cuotas, y cuánto **sobra o falta**. Lo que pasa una sola vez (un adelanto
+  de sueldo, su descuento, un saldo a favor de la tarjeta) se carga como *algo
+  de este mes*. Un sueldo cuenta para el mes que paga: el que se cobra el 30 de
+  octubre es plata de noviembre. El aguinaldo es un ingreso que entra solo en
+  junio y diciembre.
+- **Vencimientos**: cada cuota y cada gasto de la casa del mes, por día, con ✓
+  para marcarlo pagado, y cuánto falta pagar. Hoy muestra lo que vence hoy y
+  mañana, y lo que venció sin marcar; la app de Android avisa el día antes a
+  las 10. Un día 31 en un mes de 30 cae el 30.
+- **Alimentos**: el presupuesto del mes (600.000 si no se cambia) contra lo
+  gastado, y cuánto queda por semana para lo que falta. Cada gasto se carga
+  **a mano** o con **la foto del ticket**: Claude Opus 5.5 lee el comercio, la
+  fecha, cada renglón (los descuentos en negativo) y el total, y antes de
+  guardar se corrige. Se guarda todo menos la foto. Un ticket largo va en hasta
+  4 fotos, a 2048 px para que se lea la letra chica, con la misma clave de
+  Anthropic que Comida (unos 2 a 4 centavos de dólar por ticket).
+- **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa
+  más alimentos), con el mes en que se llega guardando lo que sobra.
+- **Deudas**: lo que se debe, la tasa, la cuota y cuándo termina cada una, con
+  la más cara arriba; el total y cuánto se va por mes en intereses (más IVA).
+  Una deuda puede tener cuotas distintas algunos meses (`plan`): la primera de
+  un préstamo, las compras en cuotas de la tarjeta.
+- **Los próximos 12 meses**: lo que sobra y cómo quedaría el colchón.
+
+Se carga todo desde la app o de una vez con **Importar finanzas**: un `.json`
+con `{ "finanzas": { ... } }`, o un respaldo entero, del que toma solo las
+finanzas. Se valida entero antes de tocar nada, reemplaza lo que trae y deja lo
+demás (por ejemplo, los gastos de alimentos ya cargados). `inicio` es el primer
+mes del plan: antes no se cuenta ni se avisa. Los datos viven en el teléfono y
+viajan en el respaldo, como el resto; nunca van al repo.
+
+---
+
+## Las siete pantallas
 
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
@@ -222,6 +261,8 @@ analizar la primera foto.
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
 - **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
+- **Finanzas** — el mes con lo que sobra o falta, los vencimientos para marcar,
+  alimentos contra el presupuesto (a mano o con la foto del ticket), colchón y deudas.
 - **Más** — hábitos (alta, edición, orden; los que tienen meta de series o minutos
   pueden pasar a sí o no y volver), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
@@ -240,11 +281,11 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                320 pruebas automatizadas (Playwright)
+├── test.mjs                372 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
-├── vendor/                 SDK de Anthropic empaquetado, para las fotos de Comida
+├── vendor/                 SDK de Anthropic empaquetado, para las fotos de Comida y los tickets
 ├── gen-icons.mjs           regenera los íconos (web y Android)
 ├── PUBLICAR.md             cómo subirla a GitHub Pages
 ├── package.json
@@ -311,8 +352,8 @@ Para verla en local sobre http (con service worker): `npm run serve`.
 - **Sin dependencias también en runtime.** El service worker cachea seis archivos
   y nada más. No hay CDN que pueda caerse, y la web no tiene build: Capacitor
   solo envuelve la misma `index.html` para Android. La única excepción es el SDK
-  de Anthropic para las fotos de Comida, que va copiado en `vendor/` (no de un
-  CDN) y se carga solo al analizar una foto.
+  de Anthropic para las fotos de Comida y de los tickets, que va copiado en
+  `vendor/` (no de un CDN) y se carga solo al analizar una foto.
 
 ## Próximos pasos
 
