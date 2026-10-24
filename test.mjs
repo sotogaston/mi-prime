@@ -46,7 +46,7 @@ await page.waitForTimeout(300);
 console.log('\n== 1. Carga y pantalla Hoy ==');
 ok('sin errores de consola: ' + JSON.stringify(errors), errors.length === 0);
 ok('7 hábitos renderizados', (await page.locator('.hrow').count()) === 7);
-ok('nav con 6 pestañas (Hoy, Mes, Semanas, Pasos, Comida, Más)', (await page.locator('nav button').count()) === 6);
+ok('nav con 7 pestañas (Hoy, Mes, Semanas, Pasos, Comida, Finanzas, Más)', (await page.locator('nav button').count()) === 7);
 
 console.log('\n== 2. Marcado rápido (1 toque = verde) ==');
 await page.locator('.dot').first().click();
@@ -1315,7 +1315,245 @@ console.log('\n== 35. Cintura ==');
   await ctx.close();
 }
 
-console.log('\n== 36. Capturas ==');
+// Finanzas de prueba (inventadas): el plan arranca en noviembre de 2026
+const FIN = {
+  inicio: '2026-11', presupuestoAlimentos: 400000,
+  ingresos: [{ id: 'i1', nombre: 'Sueldo', monto: 2000000, dia: 30 }, { id: 'i2', nombre: 'Aguinaldo', monto: 1000000, meses: [6, 12] }],
+  fijos: [{ id: 'f1', nombre: 'Alquiler', monto: 700000, dia: 5 }, { id: 'f2', nombre: 'Colegio', monto: 100000 }],
+  deudas: [
+    { id: 'd1', nombre: 'Préstamo caro', saldo: 1200000, cuota: 150000, tna: 60, dia: 10, hasta: '2027-02', plan: { '2026-11': 250000 } },
+    { id: 'd2', nombre: 'Tarjeta en cuotas', saldo: 300000, cuota: 0, tna: 0, dia: 25, hasta: '2026-12', plan: { '2026-11': 200000, '2026-12': 100000 } },
+    { id: 'd3', nombre: 'Billetera', saldo: 100000, cuota: 100000, dia: 31, hasta: '2026-11' }],
+  movimientos: [{ id: 'm1', mes: '2026-11', nombre: 'Descuento del adelanto', monto: -300000 }],
+  colchon: [{ id: 'c1', nombre: 'Acciones', monto: 100000 }]
+};
+const finanzas = () => JSON.parse(JSON.stringify(FIN));
+
+console.log('\n== 36. Finanzas: la cuenta del mes, vencimientos y colchón ==');
+{
+  const L = cargarLogica(estado()), F = finanzas();
+  const nov = L.resumenMes(F, '2026-11', '2026-11-04');
+  ok('noviembre: entran 2 M; salen casa 800 mil, alimentos 400 mil, cuotas 550 mil y el descuento de 300 mil; faltan 50 mil',
+    nov.entra === 2000000 && nov.casa === 800000 && nov.alimentos === 400000 && nov.cuotas === 550000 && nov.otros === 300000 && nov.sobra === -50000);
+  ok('una cuota distinta manda en su mes; después de la última, nada; el aguinaldo solo en junio y diciembre',
+    L.cuotaDelMes(F.deudas[0], '2026-11') === 250000 && L.cuotaDelMes(F.deudas[0], '2026-12') === 150000 && L.cuotaDelMes(F.deudas[0], '2027-03') === 0
+    && L.resumenMes(F, '2026-12', '2026-11-04').entra === 3000000 && L.resumenMes(F, '2027-01', '2026-11-04').entra === 2000000);
+  F.gastos = { '2026-11-02': [{ id: 'g1', comercio: 'Súper', total: 450000 }], '2026-10-20': [{ id: 'g2', comercio: 'Verdulería', total: 30000 }] };
+  ok('alimentos: si te pasaste del presupuesto cuenta lo gastado; un mes pasado, solo lo gastado',
+    L.resumenMes(F, '2026-11', '2026-11-04').alimentos === 450000 && L.resumenMes(F, '2026-10', '2026-11-04').alimentos === 30000
+    && L.gastadoEnMes(F.gastos, '2026-11') === 450000);
+  delete F.gastos;
+  const p = L.proyeccionFinanzas(F, '2026-11', 8, '2026-11-04');
+  ok('la proyección suma lo que sobra al colchón: 50 mil, 1,6 M, 2,25 M… ' + p.map(x => x.colchon).join(),
+    p.map(x => x.sobra).join() === '-50000,1550000,650000,650000,800000,800000,800000,1800000'
+    && p.map(x => x.colchon).slice(0, 3).join() === '50000,1600000,2250000');
+  ok('hitos del colchón (1, 3 y 6 meses de 1,2 M): diciembre 2026, marzo 2027, julio 2027',
+    L.hitosColchon(F, '2026-11', '2026-11-04').map(h => h.ya ? 'ya' : h.mes).join() === '2026-12,2027-03,2027-07'
+    && L.hitosColchon({ ...F, colchon: [{ id: 'x', nombre: 'x', monto: 2000000 }] }, '2026-11', '2026-11-04')[0].ya);
+  const v = L.vencimientos(F, '2026-11');
+  ok('vencimientos por día; el 31 en noviembre cae el 30; lo sin fecha al final',
+    v.map(x => `${x.nombre}@${x.fecha}`).join() === 'Alquiler@2026-11-05,Préstamo caro@2026-11-10,Tarjeta en cuotas@2026-11-25,Billetera@2026-11-30,Colegio@null'
+    && L.vencimientos(F, '2026-12').every(x => x.nombre !== 'Billetera'));
+  const avisos = L.planAvisoVencimientos(F, new Date(2026, 9, 30, 8, 0), 14, '10:00');
+  ok('avisa el día antes a las 10, solo desde el primer mes del plan: ' + avisos.map(a => a.title).join(' | '),
+    avisos.length === 2 && avisos[0].id === 600005 && avisos[0].at.getDate() === 4 && avisos[0].at.getHours() === 10
+    && avisos[0].title === 'Mañana vence Alquiler' && avisos[0].body === '$ 700.000 · Tocá para verlo' && avisos[1].title === 'Mañana vence Préstamo caro'
+    && avisos.every(a => a.canal === 'finanzas'));
+  F.pagos = { '2026-11': ['f:f1'] };
+  ok('lo pagado ya no avisa ni cuenta como pendiente', L.planAvisoVencimientos(F, new Date(2026, 9, 30, 8, 0), 14, '10:00').length === 1
+    && L.vencimientos(F, '2026-11')[0].pagado && L.vencenEl(F, '2026-11-05').length === 0 && L.vencenEl(F, '2026-11-10').length === 1);
+  const d = L.resumenDeudas(F, '2026-11');
+  ok('deudas: 1,6 M, 60 mil por mes de intereses; la tasa 0 es sin interés y la que no tiene tasa no se cuenta',
+    d.saldo === 1600000 && d.intereses === 60000 && d.sinTasa === 1 && L.cuotasQueFaltan(F.deudas[0], '2026-11') === 4 && L.resumenDeudas(F, '2026-12').activas.length === 2);
+  const r = L.ritmoAlimentos(400000, 100000, '2026-11', '2026-11-04');
+  ok('alimentos: quedan 300 mil para 27 días, unos 77.800 por semana', r.quedan === 300000 && r.dias === 27 && r.porSemana === 77800
+    && L.ritmoAlimentos(400000, 500000, '2026-11', '2026-11-04').porSemana === 0);
+  const t = L.normalizarTicket({ comercio: ' Coto ', fecha: '2026-02-31', confianza: 'segura', total: 'x',
+    items: [{ nombre: 'Leche', cantidad: 2, precio: 3000.4 }, { nombre: 'Descuento 2x1', cantidad: 1, precio: -500 }, { nombre: '  ' }, null] });
+  ok('el ticket se limpia: el descuento queda negativo, sin total se suman los renglones, una fecha imposible queda vacía',
+    t.comercio === 'Coto' && t.items.length === 2 && t.items[1].precio === -500 && t.total === 2500 && t.fecha === '' && t.confianza === 'baja'
+    && L.normalizarTicket({ fecha: '2026-11-03', total: 9999.6, items: [] }).total === 10000 && L.normalizarTicket(null).items.length === 0);
+}
+
+console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con Claude (simulado) ==');
+{
+  const { p, c, errs } = await abrirEn('2026-11-04', { ...estado({ lastClosed: '2026-11-03' }), finanzas: finanzas() });
+  const S = () => p.evaluate(() => window.__prime.S);
+  ok('Hoy avisa lo que vence mañana, con el monto', /Mañana vence: Alquiler · \$ 700\.000/.test(await p.locator('.alerta-venc').innerText())
+    && await p.locator('.alerta-venc [data-act="irFinanzas"]').count() === 1);
+  await p.locator('.alerta-venc [data-act="irFinanzas"]').click(); await p.waitForTimeout(150);
+  const hero = () => p.locator('.fin-mes .hero').innerText();
+  ok('Finanzas abre en noviembre: te faltan $ 50.000', /\$ 50\.000\s+te faltan en noviembre/.test(await hero()));
+  const cuentas = await p.locator('.fin-mes .cuentas').innerText();
+  ok('con lo que entra, la casa, alimentos y cuotas', /Entra\s+\+ \$ 2\.000\.000/.test(cuentas) && /Casa\s+− \$ 800\.000/.test(cuentas)
+    && /Alimentos\s+− \$ 400\.000/.test(cuentas) && /Cuotas\s+− \$ 550\.000/.test(cuentas));
+  ok('lo de un solo mes aparece aparte, y cuánto falta pagar', /Descuento del adelanto\s+− \$ 300\.000/.test(await p.locator('.fin-mes').innerText())
+    && /Falta pagar \$ 1\.350\.000 de cuotas y gastos y \$ 400\.000 de alimentos/.test(await p.locator('.fin-mes .pie').innerText()));
+  ok('no se puede ir antes del primer mes del plan', await p.locator('[data-act="fmes"][data-n="-1"]').isDisabled());
+  const venc = await p.locator('.venc').innerText();
+  ok('vencimientos de noviembre en orden, con "vence mañana" y lo sin fecha al final', /0 de 5 pagados/i.test(venc)
+    && venc.indexOf('Alquiler') < venc.indexOf('Préstamo caro') && venc.indexOf('Billetera') < venc.indexOf('Colegio') && /vence mañana/.test(venc) && /30\/11/.test(venc));
+  await p.locator('[data-act="fpagar"][data-k="f:f1"]').click(); await p.waitForTimeout(150);
+  ok('tocar ✓ lo marca pagado: baja lo que falta y se va el aviso', (await S()).finanzas.pagos['2026-11'].join() === 'f:f1'
+    && /Falta pagar \$ 650\.000/.test(await p.locator('.fin-mes .pie').innerText()) && await p.locator('.alerta-venc').count() === 0
+    && /1 de 5 pagados/i.test(await p.locator('.venc .card-t').innerText()));
+  const colchon = await p.locator('.colchon').innerText();
+  ok('colchón y sus hitos: diciembre 2026, marzo 2027, julio 2027', /\$ 100\.000/.test(colchon) && /menos de un mes de gastos/.test(colchon)
+    && /1 mes de gastos · \$ 1\.200\.000\s+≈ diciembre 2026/.test(colchon) && /≈ marzo 2027/.test(colchon) && /≈ julio 2027/.test(colchon));
+  const deudas = await p.locator('.deudas').innerText();
+  ok('deudas: total, intereses por mes y la más cara arriba', /\$ 1\.600\.000/.test(deudas) && /≈ \$ 60\.000 por mes/.test(deudas)
+    && /sin contar 1 deuda sin la tasa cargada/.test(deudas) && deudas.indexOf('Préstamo caro') < deudas.indexOf('Billetera') && /sin interés/.test(deudas));
+  await p.locator('summary', { hasText: 'próximos 12 meses' }).click();
+  ok('los próximos 12 meses, en millones', await p.locator('.proximos tr.tap').count() === 12
+    && /Nov 26\s+−0,05\s+0,05/.test(await p.locator('.proximos').innerText()) && /Dic 26\s+\+1,55\s+1,6/.test(await p.locator('.proximos').innerText()));
+  await p.locator('[data-act="fmes"][data-n="1"]').click(); await p.waitForTimeout(100);
+  ok('diciembre, con el aguinaldo: te sobran $ 1.550.000', /\$ 1\.550\.000\s+te sobran en diciembre/.test(await hero()));
+  await p.locator('[data-act="fmes"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  // Lo que entra: alta desde la lista
+  await p.locator('.cuentas [data-k="ingresos"]').click(); await p.waitForTimeout(100);
+  ok('la lista de lo que entra explica que el sueldo de fin de mes cuenta para el siguiente', /el del 30 de octubre es plata de noviembre/.test(await p.locator('.sheet').innerText())
+    && /Sueldo/.test(await p.locator('.sheet').innerText()) && /junio y diciembre/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="a"]').click();
+  await p.locator('#f_nombre').fill('Changa'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('sin monto no guarda', /Revisá «Monto por mes»/.test(await p.locator('body').innerText()) && await p.locator('#f_monto').count() === 1);
+  await p.locator('#f_monto').fill('100000'); await p.locator('#f_dia').fill('40'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('un día imposible tampoco', /El día va del 1 al 31/.test(await p.locator('body').innerText()));
+  await p.locator('#f_dia').fill(''); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('agregado: vuelve a la lista y el mes da $ 50.000 a favor', /Changa/.test(await p.locator('.sheet').innerText())
+    && /\$ 50\.000\s+te sobran en noviembre/.test(await hero()));
+  await p.locator('.sheet .fila', { hasText: 'Changa' }).locator('.ce').click();
+  await p.locator('.sheet [data-x="b"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('borrar pide confirmación y vuelve a la lista', !(await S()).finanzas.ingresos.some(i => i.nombre === 'Changa') && /Lo que entra/.test(await p.locator('.sheet h3').innerText()));
+  await p.locator('.sheet [data-x="c"]').click();
+  // Algo de un solo mes
+  await p.locator('[data-act="fmov"]').click();
+  await p.locator('#mNombre').fill('Adelanto'); await p.locator('#mMonto').fill('300000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('un adelanto de 300 mil: te sobran $ 250.000', /\$ 250\.000\s+te sobran/.test(await hero())
+    && (await S()).finanzas.movimientos.some(m => m.mes === '2026-11' && m.monto === 300000));
+  await p.locator('[data-act="fborrarMov"][aria-label="Sacar Adelanto"]').click(); await p.waitForTimeout(100);
+  ok('y se saca con la ✕', /\$ 50\.000\s+te faltan/.test(await hero()));
+  // Alimentos a mano
+  const alim = () => p.locator('.alimentos').innerText();
+  ok('alimentos de noviembre: $ 0 de $ 400.000, unos $ 77.800 por semana', /Alimentos · noviembre 2026/i.test(await alim())
+    && /\$ 0\s+de \$ 400\.000 · quedan \$ 400\.000/.test(await alim()) && /Para los 27 días que quedan: unos \$ 103\.700 por semana/.test(await alim()));
+  await p.locator('[data-act="fmano"]').click();
+  await p.locator('#gNombre').fill('Verdulería'); await p.locator('#gTotal').fill('25000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('agregar a mano: $ 25.000, quedan $ 375.000', /\$ 25\.000\s+de \$ 400\.000 · quedan \$ 375\.000/.test(await alim())
+    && (await S()).finanzas.gastos['2026-11-04'][0].comercio === 'Verdulería' && /4\/11\s+Verdulería\s+\$ 25\.000/.test(await alim()));
+  await p.locator('[data-act="fgasto"]').first().click();
+  await p.locator('#eTotal').fill('30000'); await p.locator('#eFecha').fill('2026-10-31'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('editar el total y la fecha lo pasa a octubre', !(await S()).finanzas.gastos['2026-11-04'] && (await S()).finanzas.gastos['2026-10-31'][0].total === 30000
+    && /\$ 0\s+de \$ 400\.000/.test(await alim()));
+  await p.locator('.alimentos [data-act="amover"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  ok('octubre, antes del plan, queda anotado sin presupuesto', /\$ 30\.000\s+en octubre; el presupuesto arranca en noviembre/.test(await alim()));
+  await p.locator('[data-act="fborrarGasto"]').first().click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('borrar un gasto pide confirmación', !(await S()).finanzas.gastos['2026-10-31']);
+  await p.locator('.alimentos [data-act="amover"][data-n="1"]').click(); await p.waitForTimeout(100);
+  await p.locator('[data-act="fpres"]').last().click(); await p.locator('#presu').fill('500000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('el presupuesto se cambia', (await S()).finanzas.presupuestoAlimentos === 500000 && /\$ 0\s+de \$ 500\.000/.test(await alim()));
+  // Ticket con Claude (simulado)
+  const pedidos = [];
+  await c.route('https://api.anthropic.com/**', async route => {
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    pedidos.push({ headers: route.request().headers(), body: route.request().postDataJSON() });
+    await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({
+      id: 'msg_t', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null,
+      usage: { input_tokens: 2000, output_tokens: 300 }, content: [{ type: 'text', text: JSON.stringify({ comercio: 'Coto', fecha: '2026-11-03',
+        items: [{ nombre: 'Leche entera', cantidad: 2, precio: 3000 }, { nombre: 'Pan', cantidad: 1, precio: 2500 }, { nombre: 'Descuento leche', cantidad: 1, precio: -500 }],
+        total: 5000, nota: 'Ningún producto de limpieza.', confianza: 'alta' }) }] }) });
+  });
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  await p.locator('[data-act="fticket"]').click(); await p.waitForTimeout(100);
+  ok('para el ticket primero pide la clave de Anthropic', await p.locator('.sheet #clave').count() === 1);
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.evaluate(() => localStorage.setItem('miPrime.claveIA', 'sk-ant-api03-' + 'x'.repeat(40)));
+  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fticket"]').click()]);
+  ok('"Foto del ticket" abre la cámara', (await fc.element().getAttribute('capture')) === 'environment');
+  await fc.setFiles({ name: 'ticket.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  ok('la hoja es del ticket: si es largo, se saca en partes', /Ticket de compra/.test(await p.locator('.sheet h3').innerText())
+    && /del mismo ticket: si es largo, sacalo en partes/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
+  const q = pedidos.at(-1), img = q?.body.messages[0].content.find(b => b.type === 'image'), txt = q?.body.messages[0].content.find(b => b.type === 'text');
+  ok('manda la foto a Claude Opus 5.5 con el prompt de tickets y su JSON schema', q && q.body.model === 'claude-opus-5-5' && img?.source.media_type === 'image/jpeg'
+    && /tickets y facturas de compra/.test(q.body.system) && /precio negativo/.test(q.body.system) && /Leé este ticket/.test(txt?.text)
+    && q.body.output_config?.format?.schema.required.join() === 'comercio,fecha,items,total,nota,confianza' && q.body.fallbacks === 'default');
+  const hoja = await p.locator('.sheet').innerText();
+  ok('muestra lo que leyó: Coto, $ 5.000, del 3/11, con los renglones y el descuento', /Lo que leyó Claude/.test(hoja)
+    && (await p.locator('#tComercio').inputValue()) === 'Coto' && (await p.locator('#tTotal').inputValue()) === '5000'
+    && (await p.locator('#tFecha').inputValue()) === '2026-11-03' && /Leche entera × 2\s+\$ 3\.000/.test(hoja) && /Descuento leche\s+− \$ 500/.test(hoja));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const g = (await S()).finanzas.gastos['2026-11-03']?.[0];
+  ok('se guarda con todo: comercio, total, renglones y nota', g?.comercio === 'Coto' && g.total === 5000 && g.origen === 'ticket' && g.items.length === 3 && /limpieza/.test(g.nota)
+    && /\$ 5\.000\s+de \$ 500\.000/.test(await alim()) && /3 renglones del ticket/.test(await alim()));
+  await p.locator('[data-act="fgasto"]').first().click();
+  ok('y tocándolo se ve el detalle', /leído de la foto del ticket/.test(await p.locator('.sheet').innerText()) && /Pan\s+\$ 2\.500/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="b"]').click(); await p.locator('.sheet [data-x="c"]').click();
+  // Importar finanzas
+  const archivo = (nombre, data) => ({ name: nombre, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+  let [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo('roto.json', { finanzas: { deudas: [{ id: 'x', nombre: 'Mal', saldo: -1, cuota: 0 }] } })); await p.waitForTimeout(200);
+  ok('importar un archivo roto no toca nada', /Archivo inválido: En finanzas, "deudas" está roto/.test(await p.locator('body').innerText())
+    && (await S()).finanzas.deudas.length === 3);
+  [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo('nuevo.json', { finanzas: { inicio: '2026-12', ingresos: [{ id: 'n1', nombre: 'Sueldo nuevo', monto: 3000000 }], fijos: [], deudas: [] } }));
+  await p.waitForTimeout(200);
+  ok('uno bueno dice qué trae y qué no toca', /Trae 1 ingreso, 0 gastos de la casa, 0 deudas.*desde diciembre 2026.*tus gastos de alimentos quedan como están/s.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const F2 = (await S()).finanzas;
+  ok('reemplaza lo que trae y deja los gastos', F2.ingresos[0].nombre === 'Sueldo nuevo' && F2.deudas.length === 0 && F2.gastos['2026-11-03'].length === 1
+    && F2.colchon.length === 1 && /\$ 2\.500\.000\s+te sobran en diciembre/.test(await hero()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{}, { finanzas: 'x' }, { finanzas: { ingresos: [{ id: 'a', nombre: '', monto: 1 }] } }, { finanzas: { pagos: { '2026-13': [] } } },
+                         { finanzas: { gastos: { '2026-11-01': [{ comercio: 'x', total: -5 }] } } }, { finanzas: { inicio: 'noviembre' } }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae las finanzas y rechaza las rotas (' + resp + ')', resp === 'ok,no,no,no,no,no');
+  const guardado = await p.evaluate(() => JSON.parse(localStorage.getItem('miPrime.v1')).finanzas);
+  ok('todo queda guardado en el celular', guardado.ingresos[0].nombre === 'Sueldo nuevo' && guardado.gastos['2026-11-03'][0].items.length === 3
+    && guardado.presupuestoAlimentos === 500000 && guardado.pagos['2026-11'].join() === 'f:f1');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 38. Finanzas en la app de Android: aviso el día antes ==');
+{
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c.clock.setFixedTime(new Date('2026-11-04T08:00:00'));
+  await c.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify({ ...estado({ lastClosed: '2026-11-03' }), finanzas: finanzas() }));
+  await c.addInitScript(() => {
+    window.__llamadas = [];
+    window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android',
+      nativePromise: async (plugin, metodo, op = {}) => {
+        window.__llamadas.push({ metodo, op: JSON.parse(JSON.stringify(op)) });
+        if (metodo === 'checkPermissions') return { display: 'granted' };
+        if (metodo === 'getPending') return { notifications: [] };
+        if (metodo === 'isHealthAvailable') return { available: false };
+        return {};
+      } };
+  });
+  const p = await c.newPage(); p.setDefaultTimeout(5000);
+  const errs = []; p.on('pageerror', e => errs.push(String(e)));
+  await p.goto(URL); await p.waitForTimeout(1200);
+  const agenda = async () => (await p.evaluate(() => window.__llamadas)).filter(l => l.metodo === 'schedule').at(-1)?.op.notifications || [];
+  const fin = async () => (await agenda()).filter(n => n.channelId === 'finanzas');
+  const ll = await p.evaluate(() => window.__llamadas);
+  let ag = await fin();
+  ok('crea el canal "Vencimientos" y avisa hoy a las 10 lo de mañana, y el 9 lo del 10',
+    ll.some(l => l.metodo === 'createChannel' && l.op.id === 'finanzas') && ag.map(n => n.id).join() === '600000,600005'
+    && ag[0].title === 'Mañana vence Alquiler' && ag[0].schedule.at === await p.evaluate(() => new Date(2026, 10, 4, 10, 0).toISOString()));
+  await ir(p, 'finanzas');
+  await p.locator('[data-act="fpagar"][data-k="f:f1"]').click(); await p.waitForTimeout(1200);
+  ag = await fin();
+  ok('pagado el alquiler, ese aviso ya no está', ag.map(n => n.id).join() === '600005');
+  ok('en la app dice a qué hora avisa', /El día antes, a las 10:00, te avisa lo que vence/.test(await p.locator('.venc').innerText()));
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 39. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
