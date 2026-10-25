@@ -1656,7 +1656,48 @@ console.log('\n== 39. Hábitos de finanzas y a dónde vas ==');
   await c2.close();
 }
 
-console.log('\n== 40. Capturas ==');
+console.log('\n== 40. Actualizar finanzas con un resumen nuevo ==');
+{
+  const st = { ...estado({ lastClosed: '2026-11-03', habits: [{ id: 'hs', name: 'Sin deuda nueva', order: 0, auto: { source: 'finanzas', regla: 'sinDeuda', desde: '2026-11-04' } }] }),
+    finanzas: { ...finanzas(), gastos: { '2026-11-02': [{ id: 'g1', comercio: 'Coto', total: 5000 }] }, pagos: { '2026-11': ['f:f1'] } } };
+  const { p, c, errs } = await abrirEn('2026-11-04', st);
+  const S = () => p.evaluate(() => window.__prime.S);
+  await ir(p, 'finanzas');
+  const archivo = (nombre, data) => ({ name: nombre, mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+  let [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo('mal.json', { actualizar: { deudas: [{ nombre: 'Sin id', saldo: 1, cuota: 1 }] } })); await p.waitForTimeout(200);
+  ok('una actualización rota no toca nada', /Archivo inválido: En "actualizar", "deudas" está roto/.test(await p.locator('body').innerText()) && (await S()).finanzas.deudas.length === 3);
+  [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo('resumen.json', { actualizar: { deudas: [
+    { id: 'd1', nombre: 'Préstamo caro', saldo: 1000000, cuota: 150000, tna: 60, dia: 10, hasta: '2027-02' },
+    { id: 'dM', nombre: 'Mastercard', saldo: 500000, cuota: 100000, tna: 35, dia: 2, hasta: '2027-06', plan: { '2026-11': 300000 } }] } }));
+  await p.waitForTimeout(200);
+  ok('dice qué suma y qué cambia, y que lo demás queda', /¿Actualizar tus finanzas\?/.test(await p.locator('.sheet').innerText())
+    && /Suma «Mastercard» y cambia «Préstamo caro»\. Lo demás queda como está\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const F = (await S()).finanzas;
+  ok('suma la nueva, cambia la que estaba por id y no toca lo demás', F.deudas.length === 4 && F.deudas.find(d => d.id === 'd1').saldo === 1000000
+    && F.deudas.find(d => d.id === 'dM').plan['2026-11'] === 300000 && F.movimientos.length === 1 && F.gastos['2026-11-02'].length === 1
+    && F.pagos['2026-11'].join() === 'f:f1' && F.ingresos.length === 2);
+  ok('y el mes ya la cuenta: noviembre suma la Mastercard y el préstamo cambiado (550 − 100 + 300 mil)', /Cuotas\s+− \$ 750\.000/.test(await p.locator('.fin-mes .cuentas').innerText()));
+  await p.locator('.deudas [data-act="fitem"][data-k="deudas"]:not([data-id])').click();
+  await p.locator('#f_nombre').fill('Tarjeta vieja'); await p.locator('#f_saldo').fill('100000'); await p.locator('#f_cuota').fill('10000');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  await ir(p, 'hoy');
+  ok('cargar una deuda que ya tenías no cuenta como deuda nueva', !(await S()).finanzas.deudas.find(d => d.nombre === 'Tarjeta vieja').alta
+    && (await p.locator('.hrow .dot').getAttribute('class')).includes('s-green'));
+  await ir(p, 'finanzas');
+  await p.locator('.deudas [data-act="fitem"][data-k="deudas"]:not([data-id])').click();
+  await p.locator('#f_nombre').fill('Préstamo de hoy'); await p.locator('#f_saldo').fill('100000'); await p.locator('#f_cuota').fill('10000');
+  await p.locator('#f_nueva').check(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  await ir(p, 'hoy');
+  ok('tildando "la saqué hoy", sí: Sin deuda nueva queda en amarillo', (await S()).finanzas.deudas.find(d => d.nombre === 'Préstamo de hoy').alta === '2026-11-04'
+    && (await p.locator('.hrow .dot').getAttribute('class')).includes('s-yellow'));
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 41. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
