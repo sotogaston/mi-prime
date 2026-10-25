@@ -244,7 +244,8 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   con lo que cargás, como *Caminar seguido* con los pasos. *Anotar lo que
   gasto* queda verde el día que cargás un gasto de alimentos (si no gastaste,
   lo marcás vos; a las 21 avisa). *Sin deuda nueva* es verde cada día y
-  amarillo el día que cargás una deuda o un adelanto marcado como deuda nueva.
+  amarillo el día que cargás una deuda tildando *La saqué hoy* o un adelanto
+  marcado como deuda nueva (cargar una deuda que ya tenías no cuenta).
   *Alimentos al ritmo* es verde mientras lo gastado en el mes no se adelanta
   más de una semana al presupuesto. *Vencimientos al día* es verde si no hay
   nada vencido sin marcar como pagado (se mira cada día, el de hoy). Lo que
@@ -255,7 +256,10 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
 Se carga todo desde la app o de una vez con **Importar finanzas**: un `.json`
 con `{ "finanzas": { ... } }`, o un respaldo entero, del que toma solo las
 finanzas. Se valida entero antes de tocar nada, reemplaza lo que trae y deja lo
-demás (por ejemplo, los gastos de alimentos ya cargados). `inicio` es el primer
+demás (por ejemplo, los gastos de alimentos ya cargados). Con
+`{ "actualizar": { "deudas": [ ... ] } }` cambia por `id` lo que ya está y suma
+lo nuevo, sin tocar el resto: sirve para cargar un resumen nuevo de la tarjeta
+sin pisar lo cargado en el celular. `inicio` es el primer
 mes del plan: antes no se cuenta ni se avisa. Los datos viven en el teléfono y
 viajan en el respaldo, como el resto; nunca van al repo.
 
@@ -299,7 +303,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                396 pruebas automatizadas (Playwright)
+├── test.mjs                403 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)

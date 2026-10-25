@@ -2533,6 +2533,7 @@ function editarItemFin(tipo, id, volver){
   const plan = tipo === "deudas" && x?.plan ? Object.entries(x.plan).sort() : [];
   sheet(`<h3>${x ? esc(x.nombre) : L.nuevo}</h3><p class="sub">${L.sub}</p>${L.campos.map(campo).join("")}
     ${plan.length ? `<p class="detalle">Cuotas distintas: ${plan.map(([m, n]) => `${mesCorto(m)} ${aPesos(n)}`).join(" · ")}.</p>` : ""}
+    ${tipo === "deudas" && !x ? `<label class="chk"><input type="checkbox" id="f_nueva"> La saqué hoy: es una deuda nueva (cuenta para «Sin deuda nueva»)</label>` : ""}
     <div class="row2">${x ? `<button class="btn ghost danger" data-x="b">Borrar</button>` : `<button class="btn ghost" data-x="c">Cancelar</button>`}
       <button class="btn" data-x="o">Guardar</button></div>`);
   const $ = q => modal.querySelector(q), salir = () => volver ? verListaFin(tipo) : closeSheet();
@@ -2552,7 +2553,7 @@ function editarItemFin(tipo, id, volver){
       else if(c === "mes"){ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)){ toast("Elegí el mes de la última cuota"); return; } nuevo[k] = v; }
     }
     if(x){ for(const [k] of L.campos) delete x[k === "aguinaldo" ? "meses" : k]; Object.assign(x, nuevo); }
-    else F[tipo].push({ id: uid(), ...nuevo, ...(tipo === "deudas" ? { alta: TODAY } : {}) });   // la fecha cuenta para "Sin deuda nueva"
+    else F[tipo].push({ id: uid(), ...nuevo, ...($("#f_nueva")?.checked ? { alta: TODAY } : {}) });   // la fecha cuenta para "Sin deuda nueva"
     save(); render(); salir(); toast(x ? "Guardado" : "Agregado");
   };
   if(!x) $("#f_nombre").focus();
@@ -3102,8 +3103,44 @@ function validarFinanzas(f){
   if(f.inicio != null && !esMes(f.inicio)) throw new Error("En finanzas, el mes de inicio está roto.");
   if(f.presupuestoAlimentos != null && !plata(f.presupuestoAlimentos)) throw new Error("En finanzas, el presupuesto de alimentos está roto.");
 }
-/* Solo las finanzas, de un respaldo entero o de un archivo que trae { finanzas }:
-   reemplaza lo que trae; lo que no trae (por ejemplo, los gastos de alimentos) queda. */
+/* Cómo quedan tus finanzas después de importar, sin tocar nada todavía, y qué decirte.
+   { finanzas } reemplaza cada parte que trae (de un respaldo entero o de un archivo
+   de finanzas); lo que no trae, como los gastos de alimentos, queda.
+   { actualizar } cambia por id los ítems que ya están y suma los nuevos: sirve para
+   cargar un resumen nuevo sin pisar lo que cargaste en el celular. */
+const LISTAS_FINANZAS = ["ingresos", "fijos", "deudas", "movimientos", "colchon"];
+function finanzasImportadas(actual, data){
+  const esObj = x => x !== null && typeof x === "object" && !Array.isArray(x);
+  if(!esObj(data) || (data.finanzas == null && data.actualizar == null)) throw new Error("No trae finanzas.");
+  const f = JSON.parse(JSON.stringify(actual)), cuantos = (x, uno, varios) => `${x} ${x === 1 ? uno : varios}`, partes = [];
+  if(data.finanzas != null){
+    const n = data.finanzas;
+    if(!esObj(n)) throw new Error(`El campo "finanzas" está roto.`);
+    Object.assign(f, n);
+    const k = x => n[x]?.length || 0;
+    partes.push(`Trae ${cuantos(k("ingresos"), "ingreso", "ingresos")}, ${cuantos(k("fijos"), "gasto de la casa", "gastos de la casa")}, `
+      + `${cuantos(k("deudas"), "deuda", "deudas")}, ${cuantos(k("movimientos"), "movimiento", "movimientos")} y ${cuantos(k("colchon"), "ahorro", "ahorros")}`
+      + `${n.inicio ? `, desde ${nombreMes(n.inicio)}` : ""}. Reemplaza eso en este celular; `
+      + (n.gastos ? "también los gastos de alimentos." : "tus gastos de alimentos quedan como están."));
+  }
+  if(data.actualizar != null){
+    if(!esObj(data.actualizar)) throw new Error(`El campo "actualizar" está roto.`);
+    const suma = [], cambia = [];
+    for(const [k, v] of Object.entries(data.actualizar)){
+      if(!LISTAS_FINANZAS.includes(k)){ f[k] = v; continue; }
+      if(!Array.isArray(v) || !v.every(x => esObj(x) && typeof x.id === "string")) throw new Error(`En "actualizar", "${k}" está roto.`);
+      for(const x of v){
+        const i = (f[k] ||= []).findIndex(y => y.id === x.id);
+        if(i >= 0){ f[k][i] = x; cambia.push(x.nombre); } else { f[k].push(x); suma.push(x.nombre); }
+      }
+    }
+    const lista = l => l.map(t => `«${t}»`).join(", ");
+    partes.push([suma.length ? `Suma ${lista(suma)}` : "", cambia.length ? `${suma.length ? "y cambia" : "Cambia"} ${lista(cambia)}` : ""]
+      .filter(Boolean).join(" ") + ". Lo demás queda como está.");
+  }
+  validarFinanzas(f);
+  return { nuevo: f, texto: partes.join(" ") + " Hábitos y comidas no se tocan.", reemplaza: data.finanzas != null };
+}
 function doImportFinanzas(){
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = "application/json,.json";
@@ -3111,23 +3148,15 @@ function doImportFinanzas(){
     const f = inp.files[0]; if(!f) return;
     const r = new FileReader();
     r.onload = () => {
-      let nuevo;
+      let imp;
       try{
         let data; try{ data = JSON.parse(String(r.result)); }catch(e){ throw new Error("No es un archivo JSON."); }
-        nuevo = data?.finanzas;
-        if(nuevo == null) throw new Error("No trae finanzas.");
-        validarFinanzas(nuevo);
+        imp = finanzasImportadas(fin(), data);
       }catch(e){ toast("Archivo inválido: " + e.message); return; }
-      const n = k => nuevo[k]?.length || 0, cuantos = (x, uno, varios) => `${x} ${x === 1 ? uno : varios}`;
-      confirmSheet("¿Reemplazar tus finanzas?",
-        `Trae ${cuantos(n("ingresos"), "ingreso", "ingresos")}, ${cuantos(n("fijos"), "gasto de la casa", "gastos de la casa")}, `
-        + `${cuantos(n("deudas"), "deuda", "deudas")}, ${cuantos(n("movimientos"), "movimiento", "movimientos")} y ${cuantos(n("colchon"), "ahorro", "ahorros")}`
-        + `${nuevo.inicio ? `, desde ${nombreMes(nuevo.inicio)}` : ""}. Reemplaza eso en este celular; `
-        + (nuevo.gastos ? "también los gastos de alimentos." : "tus gastos de alimentos quedan como están.") + " Hábitos y comidas no se tocan.",
-        "Reemplazar", () => {
-          S.finanzas = { ...fin(), ...nuevo }; fin(); FIN_MES = ALIM_MES = null;
-          save(); TAB = "finanzas"; render(); toast("Finanzas importadas");
-        });
+      confirmSheet(imp.reemplaza ? "¿Reemplazar tus finanzas?" : "¿Actualizar tus finanzas?", imp.texto, imp.reemplaza ? "Reemplazar" : "Actualizar", () => {
+        S.finanzas = imp.nuevo; fin(); FIN_MES = ALIM_MES = null;
+        save(); TAB = "finanzas"; render(); toast("Finanzas importadas");
+      });
     };
     r.readAsText(f);
   };
@@ -3673,7 +3702,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* cintura */ cinturaAltura, cambioCintura, metaCintura,
   /* comidas por tipo */ tipoPorHora, tipoDe, faltanComidas, nombresComidas, planAvisoComidas, TIPOS_COMIDA,
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos,
-  /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas,
+  /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS };
 </script>
 </body>
