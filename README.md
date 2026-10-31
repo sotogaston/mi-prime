@@ -219,29 +219,11 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   para marcarlo pagado, y cuánto falta pagar. Hoy muestra lo que vence hoy y
   mañana, y lo que venció sin marcar; la app de Android avisa el día antes a
   las 10. Un día 31 en un mes de 30 cae el 30.
-- **Alimentos** y **Gastos**, en dos tarjetas: alimentos tiene su presupuesto
-  (600.000 si no se cambia) y cuánto queda por semana para lo que falta; gastos
-  es lo que no es comida ni está en la casa (salidas, transporte, suscripciones,
-  regalos, gustos) y arranca sin presupuesto, para medir primero. Cada gasto
-  lleva una **categoría** (súper, verdulería y carnicería, delivery, kiosco,
-  salidas, transporte, suscripciones, familia y regalos, gustos personales,
-  casa, salud, otros) y de ahí sale en qué tarjeta va; los viejos, sin
-  categoría, son alimentos. Se carga **a mano** o con **la foto del ticket o
-  del comprobante** (también los de Mercado Pago): Claude Opus 5.5 lee el
-  comercio, la fecha, la categoría, cada renglón (los descuentos en negativo) y
-  el total, y antes de guardar se corrige. Se guarda todo menos la foto. Un
-  ticket largo va en hasta 4 fotos, a 2048 px para que se lea la letra chica,
-  con la misma clave de Anthropic que Comida (unos 2 a 4 centavos de dólar por
-  ticket). *Ya está en un gasto de la casa* marca lo que ya se cuenta en Casa
-  (una suscripción, los gastos de Tizi): se ve en la lista y en el análisis,
-  pero no se suma de nuevo al mes ni al presupuesto.
-- **Dónde se va la plata**: por semana (de lunes a domingo) o por mes, el total
-  dividido en alimentos y gastos, cada categoría de mayor a menor con su
-  porcentaje y lo del período anterior, los **gastos hormiga** (los de menos de
-  $ 20.000: cuántos y cuánto suman) y los comercios donde más se gastó. Es la
-  base para el análisis de cada sábado y para comparar mes a mes.
-- **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa,
-  alimentos y el presupuesto de gastos), con el mes en que se llega guardando
+- **Alimentos** y **Otros gastos**: el mes los cuenta con su presupuesto (o con
+  lo gastado, si ya se pasó); tocándolos se va a la pestaña **Gastos**, donde se
+  cargan y se controlan.
+- **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa y
+  el presupuesto de alimentos y de otros gastos), con el mes en que se llega guardando
   lo que sobra.
 - **Deudas**: lo que se debe, la tasa, la cuota y cuándo termina cada una, con
   la más cara arriba; el total y cuánto se va por mes en intereses (más IVA).
@@ -257,10 +239,10 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   cambia cada día.
 - **Hábitos de finanzas**: cuatro hábitos para sumar a Hoy que se marcan solos
   con lo que cargás, como *Caminar seguido* con los pasos. *Anotar lo que
-  gasto* queda verde el día que cargás un gasto de alimentos (si no gastaste,
-  lo marcás vos; a las 21 avisa). *Sin deuda nueva* es verde cada día y
-  amarillo el día que cargás una deuda tildando *La saqué hoy* o un adelanto
-  marcado como deuda nueva (cargar una deuda que ya tenías no cuenta).
+  gasto* queda verde el día que cargás un gasto (si no gastaste, lo marcás vos;
+  a las 21 avisa). *Sin deuda nueva* es verde cada día y amarillo el día que
+  cargás una deuda tildando *La saqué hoy*, un adelanto marcado como deuda nueva
+  o una compra en cuotas (cargar una deuda que ya tenías no cuenta).
   *Alimentos al ritmo* es verde mientras lo gastado en el mes no se adelanta
   más de una semana al presupuesto. *Vencimientos al día* es verde si no hay
   nada vencido sin marcar como pagado (se mira cada día, el de hoy). Lo que
@@ -271,7 +253,7 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
 Se carga todo desde la app o de una vez con **Importar finanzas**: un `.json`
 con `{ "finanzas": { ... } }`, o un respaldo entero, del que toma solo las
 finanzas. Se valida entero antes de tocar nada, reemplaza lo que trae y deja lo
-demás (por ejemplo, los gastos de alimentos ya cargados). Con
+demás (por ejemplo, los gastos ya cargados y sus presupuestos). Con
 `{ "actualizar": { "deudas": [ ... ] } }` cambia por `id` lo que ya está y suma
 lo nuevo, sin tocar el resto: sirve para cargar un resumen nuevo de la tarjeta
 sin pisar lo cargado en el celular. `inicio` es el primer
@@ -280,7 +262,60 @@ viajan en el respaldo, como el resto; nunca van al repo.
 
 ---
 
-## Las siete pantallas
+## Gastos: la administración de los gastos del mes
+
+La pestaña **Gastos** es el control de lo que se gasta día a día, con una
+mirada de libro contable: un presupuesto por categoría, cada movimiento
+anotado, el cierre de fin de mes y las estadísticas, porque lo que no se mide
+no se puede mejorar. Arriba, ‹ › para ver otros meses.
+
+- **El mes**: lo gastado contra el presupuesto, cuánto queda, cuánto se puede
+  gastar por semana en lo que falta y, desde el tercer día, a dónde llega a
+  este ritmo. Dividido en **necesario** y **gustos**, en pesos y en porcentaje.
+- **Cargar un gasto**: **a mano** o con **la foto del ticket o del
+  comprobante** (también los de Mercado Pago): Claude Opus 5.5 lee el comercio,
+  la fecha, la categoría, **con qué se pagó**, cada renglón (los descuentos en
+  negativo) y el total, y antes de guardar se corrige. Se guarda todo menos la
+  foto. Un ticket largo va en hasta 4 fotos, a 2048 px para que se lea la letra
+  chica, con la misma clave de Anthropic que Comida (unos 2 a 4 centavos de
+  dólar por ticket). *Ya está en un gasto de la casa* marca lo que ya se cuenta
+  en Casa (una suscripción, los gastos de Tizi): se ve en la lista y en el
+  análisis, pero no se suma de nuevo al mes ni al presupuesto.
+- **Presupuesto por categoría** (sobres): cada categoría tiene su monto y su
+  barra; dice cuánto queda o cuánto y qué porcentaje se pasó. Las categorías
+  son de **alimentos** (súper y almacén, verdulería y carnicería, delivery y
+  comida hecha, kiosco, café y snacks) y de **otros gastos** (salidas,
+  transporte, suscripciones, familia y regalos, gustos personales, casa y
+  mantenimiento, salud y farmacia, mascotas, otros), y cada una es una
+  **necesidad** o un **gusto**. El primer reparto sale del presupuesto de
+  alimentos que había (la mitad al súper, un cuarto a verdulería, un sexto a
+  delivery y el resto a kiosco); otros gastos arranca sin presupuesto, para
+  medir primero. Los gastos viejos, sin categoría, cuentan como alimentos.
+- **Con qué pagaste**: débito, efectivo o transferencia; tarjeta en un pago;
+  tarjeta en cuotas. Comprar en cuotas es deuda nueva y deja *Sin deuda nueva*
+  en amarillo ese día.
+- **Movimientos**: el libro diario del mes, de hoy para atrás, con el total de
+  cada día; tocando un gasto se edita (comercio, total, fecha, categoría, medio)
+  o se ven los renglones del ticket.
+- **Dónde se va la plata**: por semana (de lunes a domingo) o por mes, el total
+  dividido en alimentos y otros gastos y el porcentaje de gustos, cada categoría
+  de mayor a menor con su porcentaje y lo del período anterior, los **gastos
+  hormiga** (los de menos de $ 20.000: cuántos y cuánto suman) y los comercios
+  donde más se gastó. Es la base para el análisis de cada sábado.
+- **Cierre del mes**: tres pasos para tildar el último día (comparar con los
+  resúmenes de la tarjeta y de Mercado Pago y cargar lo que falta, revisar
+  dónde te pasaste y por qué, ajustar el presupuesto del mes que viene), con las
+  categorías que se pasaron; con los tres, el resumen del mes cerrado.
+- **Cómo vamos**: la curva de lo gastado en el mes contra el presupuesto
+  repartido parejo (tocando un día se ve el detalle), necesidad o gusto y con
+  qué pagaste en barras con su porcentaje, los últimos 6 meses contra el
+  presupuesto, y las estadísticas: por día, por gasto, cuántos gastos, el día
+  y el día de la semana de más gasto, hormiga, gustos, con tarjeta y contra el
+  mes anterior.
+
+---
+
+## Las ocho pantallas
 
 - **Hoy** — checklist en orden de horario, con un toque = verde. El `⋯` abre el
   selector de los tres colores. Banner de alerta cuando un hábito viene de
@@ -298,9 +333,11 @@ viajan en el respaldo, como el resto; nunca van al repo.
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
 - **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
+- **Gastos** — la administración de los gastos: presupuesto por categoría,
+  necesidad o gusto, con qué pagaste, los movimientos, dónde se va la plata, el
+  cierre del mes y cómo vamos en gráficos y estadísticas.
 - **Finanzas** — el mes con lo que sobra o falta, los vencimientos para marcar,
-  alimentos y gastos por separado (a mano o con la foto del ticket), dónde se va
-  la plata, colchón y deudas.
+  a dónde vas, colchón y deudas.
 - **Más** — hábitos (alta, edición, orden; los que tienen meta de series o minutos
   pueden pasar a sí o no y volver), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
@@ -319,7 +356,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                424 pruebas automatizadas (Playwright)
+├── test.mjs                454 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
