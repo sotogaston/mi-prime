@@ -219,9 +219,21 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   para marcarlo pagado, y cuánto falta pagar. Hoy muestra lo que vence hoy y
   mañana, y lo que venció sin marcar; la app de Android avisa el día antes a
   las 10. Un día 31 en un mes de 30 cae el 30.
-- **Alimentos** y **Otros gastos**: el mes los cuenta con su presupuesto (o con
-  lo gastado, si ya se pasó); tocándolos se va a la pestaña **Gastos**, donde se
-  cargan y se controlan.
+- **Alimentos** y **Otros gastos**: el mes cuenta la plata que sale de la
+  cuenta (la caja): lo gastado que no fue con tarjeta y lo que queda del
+  presupuesto; tocándolos se va a la pestaña **Gastos**, donde se cargan y se
+  controlan. Lo pagado con **tarjeta** se paga con el resumen: en un pago, con el
+  del mes siguiente; en cuotas, una por mes desde ahí (con el **día de cierre**,
+  lo comprado después del cierre va un mes más adelante). Aparece como
+  *Tarjeta, de lo cargado en Gastos* en el mes en que se paga, con el detalle, y
+  se marca *ya está en el resumen* cuando se carga el resumen real en Deudas, para
+  no contarlo dos veces.
+- **Indicadores del mes**, con su meta de referencia y si está en meta, en
+  palabras: cuotas de deudas y casa como porcentaje del ingreso (hasta 30 % y
+  50 %), ahorro (10 % o más), el mes sin lo de una sola vez (sin adelantos,
+  préstamos, descuentos ni saldos a favor), la deuda nueva (préstamos con fecha
+  de alta, adelantos marcados como deuda, compras en cuotas; meta $ 0) y lo que
+  se fue sin anotar, de la conciliación (menos de 10 %).
 - **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa y
   el presupuesto de alimentos y de otros gastos), con el mes en que se llega guardando
   lo que sobra.
@@ -256,7 +268,8 @@ finanzas. Se valida entero antes de tocar nada, reemplaza lo que trae y deja lo
 demás (por ejemplo, los gastos ya cargados y sus presupuestos). Con
 `{ "actualizar": { "deudas": [ ... ] } }` cambia por `id` lo que ya está y suma
 lo nuevo, sin tocar el resto: sirve para cargar un resumen nuevo de la tarjeta
-sin pisar lo cargado en el celular. `inicio` es el primer
+sin pisar lo cargado en el celular. `"presupuestos": { "salidas": 80000 }`
+cambia solo esas categorías (con 0, la saca). `inicio` es el primer
 mes del plan: antes no se cuenta ni se avisa. Los datos viven en el teléfono y
 viajan en el respaldo, como el resto; nunca van al repo.
 
@@ -270,8 +283,9 @@ anotado, el cierre de fin de mes y las estadísticas, porque lo que no se mide
 no se puede mejorar. Arriba, ‹ › para ver otros meses.
 
 - **El mes**: lo gastado contra el presupuesto, cuánto queda, cuánto se puede
-  gastar por semana en lo que falta y, desde el tercer día, a dónde llega a
-  este ritmo. Dividido en **necesario** y **gustos**, en pesos y en porcentaje.
+  gastar por semana en lo que falta, **cuánto podés gastar hoy** y, desde el
+  tercer día, a dónde llega a este ritmo. Dividido en **necesario** y
+  **gustos**, en pesos y en porcentaje.
 - **Cargar un gasto**: **a mano** o con **la foto del ticket o del
   comprobante** (también los de Mercado Pago): Claude Opus 5.5 lee el comercio,
   la fecha, la categoría, **con qué se pagó**, cada renglón (los descuentos en
@@ -292,8 +306,9 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
   delivery y el resto a kiosco); otros gastos arranca sin presupuesto, para
   medir primero. Los gastos viejos, sin categoría, cuentan como alimentos.
 - **Con qué pagaste**: débito, efectivo o transferencia; tarjeta en un pago;
-  tarjeta en cuotas. Comprar en cuotas es deuda nueva y deja *Sin deuda nueva*
-  en amarillo ese día.
+  tarjeta en cuotas, con en cuántas (Claude lo lee si se ve). Decide cuándo sale
+  la plata en Finanzas: lo de débito, ese mes; lo de tarjeta, con el resumen.
+  Comprar en cuotas es deuda nueva y deja *Sin deuda nueva* en amarillo ese día.
 - **Movimientos**: el libro diario del mes, de hoy para atrás, con el total de
   cada día; tocando un gasto se edita (comercio, total, fecha, categoría, medio)
   o se ven los renglones del ticket.
@@ -305,7 +320,12 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
 - **Cierre del mes**: tres pasos para tildar el último día (comparar con los
   resúmenes de la tarjeta y de Mercado Pago y cargar lo que falta, revisar
   dónde te pasaste y por qué, ajustar el presupuesto del mes que viene), con las
-  categorías que se pasaron; con los tres, el resumen del mes cerrado.
+  categorías que se pasaron; con los tres, el resumen del mes cerrado. Y la
+  **conciliación**: la plata que hay (banco, Mercado Pago y efectivo) al empezar
+  y al terminar el mes, y lo que entró en el medio (lo del plan, si no se
+  cambia). Lo que salió de verdad menos lo anotado (lo marcado pagado de la casa
+  y las cuotas, y los gastos que no fueron con tarjeta) es lo que **se fue sin
+  anotar**, en pesos y en porcentaje.
 - **Cómo vamos**: la curva de lo gastado en el mes contra el presupuesto
   repartido parejo (tocando un día se ve el detalle), necesidad o gusto y con
   qué pagaste en barras con su porcentaje, los últimos 6 meses contra el
@@ -325,7 +345,8 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
   disciplina mezclado al azar, sin repetir hasta pasar por todas (la maldición
   de la disciplina, quedarse quieto duele más que avanzar, "la calidad no es un
   acto, es un hábito"…); tocándola se ven todas y cuántas veces marcaste verde
-  desde que empezaste. Nota del día.
+  desde que empezaste. **Hoy podés gastar**: lo que queda del presupuesto del
+  mes repartido en los días que faltan, y cuánto llevás hoy. Nota del día.
 - **Mes** — la rueda de 31 días: un anillo por hábito del centro hacia afuera, un
   sector por día, el día de hoy con contorno, Prime % en el centro. Las celdas se
   tocan para cambiarlas.
@@ -356,7 +377,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                454 pruebas automatizadas (Playwright)
+├── test.mjs                488 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
