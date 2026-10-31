@@ -2,7 +2,7 @@
    los marcadores @logica:inicio y @logica:fin. Esto lo recorta y lo corre en
    Node, con S y save() provistos desde afuera, para probarla sin navegador.
    Devuelve el contexto: sus funciones y constantes (ST, ORIGIN, TODAY, FERIADOS_AR, REFLEXIONES, TIPOS_COMIDA, COMIDAS_DEL_DIA,
-   PRESUPUESTO_ALIMENTOS, HITOS_COLCHON, HABITOS_FINANZAS, FRASES_FINANZAS, CATEGORIAS_GASTO, HORMIGA). */
+   PRESUPUESTO_ALIMENTOS, HITOS_COLCHON, HABITOS_FINANZAS, FRASES_FINANZAS, CATEGORIAS_GASTO, HORMIGA, MEDIOS_PAGO). */
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -11,6 +11,6 @@ export function cargarLogica(S, save = () => {}){
   const m = html.match(/\/\* @logica:inicio \*\/([\s\S]*?)\/\* @logica:fin \*\//);
   if(!m) throw new Error('index.html no tiene los marcadores /* @logica:inicio */ y /* @logica:fin */');
   const ctx = vm.createContext({ S, save, console });
-  vm.runInContext(m[1] + '\n;Object.assign(globalThis, { ST, ORIGIN, TODAY, FERIADOS_AR, REFLEXIONES, TIPOS_COMIDA, COMIDAS_DEL_DIA, PRESUPUESTO_ALIMENTOS, HITOS_COLCHON, HABITOS_FINANZAS, FRASES_FINANZAS, CATEGORIAS_GASTO, HORMIGA });', ctx, { filename: 'index.html#logica' });
+  vm.runInContext(m[1] + '\n;Object.assign(globalThis, { ST, ORIGIN, TODAY, FERIADOS_AR, REFLEXIONES, TIPOS_COMIDA, COMIDAS_DEL_DIA, PRESUPUESTO_ALIMENTOS, HITOS_COLCHON, HABITOS_FINANZAS, FRASES_FINANZAS, CATEGORIAS_GASTO, HORMIGA, MEDIOS_PAGO });', ctx, { filename: 'index.html#logica' });
   return ctx;
 }

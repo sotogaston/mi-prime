@@ -198,8 +198,8 @@ svg{display:block;width:100%;height:auto;overflow:visible}
 nav{position:fixed;left:0;right:0;bottom:0;z-index:40;background:color-mix(in srgb,var(--surface) 88%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom)}
-.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(7,1fr)}
-.navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:10px;font-weight:600;color:var(--muted)}
+.navin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(8,1fr)}
+.navin button{padding:9px 0 10px;display:grid;justify-items:center;gap:3px;font-size:9.5px;font-weight:600;color:var(--muted)}
 .navin button b{font-size:20px;line-height:1;font-weight:400}
 .navin button[aria-current=true]{color:var(--ink)}
 
@@ -302,6 +302,22 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 .cat-b i{display:block;height:100%;border-radius:4px;background:var(--ink-2)}
 .cat-s{display:block;margin-top:4px}
 .hormiga{margin:12px 0 0;font-size:14px;line-height:1.5}
+.cat-s.warn{color:var(--fail);font-weight:700}
+.frow-p{display:grid;grid-template-columns:1fr 120px;gap:10px;align-items:center;padding:4px 0}
+.frow-p label{font-size:14px;line-height:1.3}
+.frow-p small{color:var(--muted)}
+.frow-p input{padding:8px;text-align:right}
+.partes{display:flex;gap:2px;height:10px;margin:8px 0 6px}
+.partes i{display:block;height:100%;background:var(--ink-2);border-radius:3px}
+.parte{display:flex;align-items:center;gap:8px;font-size:13.5px;padding:3px 0}
+.parte i{width:10px;height:10px;border-radius:3px;background:var(--ink-2);flex:none}
+.parte span{flex:1}
+.parte b{font-variant-numeric:tabular-nums}
+.parte small{color:var(--muted);font-variant-numeric:tabular-nums;min-width:86px;text-align:right}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-2);margin-top:6px}
+.leyenda i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:6px}
+.gastos-stats{margin:8px 0 0}
+.gastos-stats .stat b{font-size:17px}
 .cab{display:flex;align-items:center;gap:2px}
 .cab span{flex:1}
 .cab button{width:30px;height:26px;border-radius:8px;font-size:17px;color:var(--ink-2);letter-spacing:0}
@@ -327,6 +343,7 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
     <button data-tab="semana" aria-current="false"><b>◔</b>Semanas</button>
     <button data-tab="pasos"  aria-current="false"><b>▥</b>Pasos</button>
     <button data-tab="comida" aria-current="false"><b>◫</b>Comida</button>
+    <button data-tab="gastos" aria-current="false"><b>◧</b>Gastos</button>
     <button data-tab="finanzas" aria-current="false"><b>$</b>Finanzas</button>
     <button data-tab="mas"    aria-current="false"><b>≡</b>Más</button>
   </div>
@@ -1233,29 +1250,52 @@ function sumarMeses(mes, n){ const [y, m] = mes.split("-").map(Number); return i
 function fechaDelMes(mes, dia){ const [y, m] = mes.split("-").map(Number); return iso(new Date(y, m - 1, Math.min(dia, daysInMonth(y, m - 1)))); }
 function cuotaDelMes(d, mes){ return d.hasta && mes > d.hasta ? 0 : d.plan?.[mes] ?? d.cuota ?? 0; }
 function ingresoDelMes(i, mes){ return !i.meses?.length || i.meses.includes(Number(mes.slice(5))) ? i.monto || 0 : 0; }
-function presupuestoAlimentos(F){ return F?.presupuestoAlimentos ?? PRESUPUESTO_ALIMENTOS; }
+/* Presupuesto del mes por categoría: S.finanzas.presupuestos = { super: 300000, … }.
+   El de un rubro es la suma de sus categorías. Mientras no haya presupuestos por
+   categoría, el de alimentos es presupuestoAlimentos (600.000 si no se cambió) y el
+   de otros gastos, presupuestoGastos (ninguno si no se puso). */
+function presupuestoRubro(F, rubro){
+  const p = F?.presupuestos;
+  if(p) return suma(Object.keys(CATEGORIAS_GASTO).filter(k => CATEGORIAS_GASTO[k].rubro === rubro), k => p[k]);
+  return rubro === "alimentos" ? F?.presupuestoAlimentos ?? PRESUPUESTO_ALIMENTOS : F?.presupuestoGastos || 0;
+}
+function presupuestoAlimentos(F){ return presupuestoRubro(F, "alimentos"); }
+/* El primer reparto por categoría: lo de alimentos, la mitad al súper, un cuarto a
+   verdulería y carnicería, un sexto a delivery y el resto a kiosco; lo de otros
+   gastos, a Otros */
+function presupuestosIniciales(F){
+  const a = F?.presupuestoAlimentos ?? PRESUPUESTO_ALIMENTOS, g = F?.presupuestoGastos || 0;
+  const sup = Math.round(a / 2), fre = Math.round(a / 4), del = Math.round(a / 6);
+  return { super: sup, fresco: fre, delivery: del, kiosco: a - sup - fre - del, ...(g ? { otros: g } : {}) };
+}
 const suma = (lista, f) => (lista || []).reduce((t, x) => t + (f(x) || 0), 0);
 /* ---- gastos: alimentos por un lado y el resto por otro ----
-   Cada gasto lleva una categoría (CATEGORIAS_GASTO) y de ahí sale su rubro:
-   alimentos o gastos. Los viejos, sin categoría, son alimentos. deCasa: el gasto
-   ya está en un gasto fijo de la casa (una suscripción, los gastos de Tizi): se
-   ve en el análisis, pero no se suma de nuevo al mes ni al presupuesto. */
+   Cada gasto (S.finanzas.gastos = { "2026-11-02": [{ id, comercio, total, categoria?,
+   medio?, deCasa?, items?, origen, nota? }] }) lleva una categoría (CATEGORIAS_GASTO)
+   y de ahí salen su rubro, alimentos u otros gastos, y si es una necesidad o un
+   gusto. Los viejos, sin categoría, son alimentos y necesarios. medio: con qué se
+   pagó (MEDIOS_PAGO). deCasa: ya está en un gasto fijo de la casa (una suscripción,
+   los gastos de Tizi): se ve en el análisis, pero no se suma de nuevo al mes ni al
+   presupuesto. */
 const CATEGORIAS_GASTO = {
-  super:         { rubro: "alimentos", nombre: "Súper y almacén" },
-  fresco:        { rubro: "alimentos", nombre: "Verdulería y carnicería" },
-  delivery:      { rubro: "alimentos", nombre: "Delivery y comida hecha" },
-  kiosco:        { rubro: "alimentos", nombre: "Kiosco, café y snacks" },
-  salidas:       { rubro: "gastos", nombre: "Salidas y entretenimiento" },
-  transporte:    { rubro: "gastos", nombre: "Transporte" },
-  suscripciones: { rubro: "gastos", nombre: "Suscripciones y apps" },
-  familia:       { rubro: "gastos", nombre: "Familia y regalos" },
-  personal:      { rubro: "gastos", nombre: "Gustos personales" },
-  casa:          { rubro: "gastos", nombre: "Casa y mantenimiento" },
-  salud:         { rubro: "gastos", nombre: "Salud y farmacia" },
-  otros:         { rubro: "gastos", nombre: "Otros" }
+  super:         { rubro: "alimentos", tipo: "necesario", nombre: "Súper y almacén" },
+  fresco:        { rubro: "alimentos", tipo: "necesario", nombre: "Verdulería y carnicería" },
+  delivery:      { rubro: "alimentos", tipo: "gusto",     nombre: "Delivery y comida hecha" },
+  kiosco:        { rubro: "alimentos", tipo: "gusto",     nombre: "Kiosco, café y snacks" },
+  salidas:       { rubro: "gastos",    tipo: "gusto",     nombre: "Salidas y entretenimiento" },
+  transporte:    { rubro: "gastos",    tipo: "necesario", nombre: "Transporte" },
+  suscripciones: { rubro: "gastos",    tipo: "gusto",     nombre: "Suscripciones y apps" },
+  familia:       { rubro: "gastos",    tipo: "gusto",     nombre: "Familia y regalos" },
+  personal:      { rubro: "gastos",    tipo: "gusto",     nombre: "Gustos personales" },
+  casa:          { rubro: "gastos",    tipo: "necesario", nombre: "Casa y mantenimiento" },
+  salud:         { rubro: "gastos",    tipo: "necesario", nombre: "Salud y farmacia" },
+  mascotas:      { rubro: "gastos",    tipo: "necesario", nombre: "Mascotas" },
+  otros:         { rubro: "gastos",    tipo: "gusto",     nombre: "Otros" }
 };
-const RUBROS = { alimentos: "Alimentos", gastos: "Gastos" };
+const RUBROS = { alimentos: "Alimentos", gastos: "Otros gastos" };
+const MEDIOS_PAGO = { debito: "Débito, efectivo o transferencia", tarjeta: "Tarjeta en un pago", cuotas: "Tarjeta en cuotas" };
 function rubroDe(g){ return CATEGORIAS_GASTO[g?.categoria]?.rubro || "alimentos"; }
+function tipoDeGasto(g){ return CATEGORIAS_GASTO[g?.categoria]?.tipo || "necesario"; }
 function nombreCategoria(c){ return CATEGORIAS_GASTO[c]?.nombre || "Sin categoría"; }
 /* Los gastos del mes en orden de fecha, con su día y su lugar en la lista de ese
    día; con rubro, solo los de ese rubro */
@@ -1265,7 +1305,7 @@ function gastosDelMes(gastos, mes, rubro){
 }
 /* Lo gastado en el mes en un rubro, sin lo que ya está en la casa */
 function gastadoEnMes(gastos, mes, rubro = "alimentos"){ return suma(gastosDelMes(gastos, mes, rubro).filter(x => !x.g.deCasa), x => x.g.total); }
-function presupuestoGastos(F){ return F?.presupuestoGastos || 0; }
+function presupuestoGastos(F){ return presupuestoRubro(F, "gastos"); }
 function gastoMensual(F){ return suma(F?.fijos, f => f.monto) + presupuestoAlimentos(F) + presupuestoGastos(F); }
 function totalColchon(F){ return suma(F?.colchon, c => c.monto); }
 
@@ -1369,6 +1409,7 @@ function normalizarTicket(r){
   const fecha = typeof r?.fecha === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.fecha) && iso(parseISO(r.fecha)) === r.fecha ? r.fecha : "";
   return { comercio: String(r?.comercio || "").trim().slice(0, 60), fecha, items,
            categoria: Object.hasOwn(CATEGORIAS_GASTO, r?.categoria) ? r.categoria : "",
+           medio: Object.hasOwn(MEDIOS_PAGO, r?.medio) ? r.medio : "",
            total: plata(r?.total, 0) || Math.max(0, suma(items, i => i.precio)),
            nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
 }
@@ -1389,10 +1430,52 @@ function analisisGastos(gastos, desde, hasta){
   const chicos = l.filter(g => g.total < HORMIGA);
   return { total: suma(l, g => g.total), n: l.length,
            alimentos: suma(l.filter(g => rubroDe(g) === "alimentos"), g => g.total), gastos: suma(l.filter(g => rubroDe(g) === "gastos"), g => g.total),
+           gustos: suma(l.filter(g => tipoDeGasto(g) === "gusto"), g => g.total),
            deCasa: suma(l.filter(g => g.deCasa), g => g.total),
            categorias: Object.values(cats).sort((a, b) => b.total - a.total),
            comercios: Object.values(coms).sort((a, b) => b.total - a.total || b.n - a.n),
            hormiga: { n: chicos.length, total: suma(chicos, g => g.total) } };
+}
+
+/* Cada categoría con presupuesto o con algo gastado en el mes (sin lo que ya está en
+   la casa); lo que no tiene categoría va aparte, con la clave "" */
+function sobresDelMes(F, mes){
+  const l = gastosDelMes(F?.gastos, mes).filter(x => !x.g.deCasa);
+  const gastado = k => suma(l.filter(x => (CATEGORIAS_GASTO[x.g.categoria] ? x.g.categoria : "") === k), x => x.g.total);
+  return [...Object.entries(CATEGORIAS_GASTO).map(([k, c]) => ({ categoria: k, ...c, presupuesto: F?.presupuestos?.[k] || 0, gastado: gastado(k) })),
+          { categoria: "", rubro: "alimentos", tipo: "necesario", nombre: "Sin categoría", presupuesto: 0, gastado: gastado("") }]
+    .filter(s => s.presupuesto || s.gastado);
+}
+/* Las estadísticas del mes, sin lo que ya está en la casa: por día y por gasto, el
+   día y el día de la semana de más gasto, necesidad o gusto, con qué se pagó, los
+   hormiga, el acumulado día por día (null en los que no pasaron) y, en el mes en
+   curso desde el tercer día, a dónde llega a este ritmo */
+function estadisticasGastos(gastos, mes, hoy){
+  const [y, m] = mes.split("-").map(Number), dim = daysInMonth(y, m - 1);
+  const l = gastosDelMes(gastos, mes).filter(x => !x.g.deCasa), total = suma(l, x => x.g.total);
+  const corrido = mes < mesDe(hoy) ? dim : mes > mesDe(hoy) ? 0 : parseISO(hoy).getDate();
+  const porFecha = {}, porDiaSemana = Array(7).fill(0);
+  for(const x of l){ porFecha[x.fecha] = (porFecha[x.fecha] || 0) + x.g.total; porDiaSemana[parseISO(x.fecha).getDay()] += x.g.total; }
+  let acum = 0;
+  const serie = Array.from({ length: dim }, (_, i) => {
+    const ds = fechaDelMes(mes, i + 1);
+    acum += porFecha[ds] || 0;
+    return { fecha: ds, gastado: porFecha[ds] || 0, acumulado: i < corrido ? acum : null };
+  });
+  const mejor = Object.entries(porFecha).sort((a, b) => b[1] - a[1])[0], por = f => suma(l.filter(x => f(x.g)), x => x.g.total);
+  return { total, n: l.length, dias: corrido, porDia: corrido ? Math.round(total / corrido) : 0, ticket: l.length ? Math.round(total / l.length) : 0,
+           mejorDia: mejor ? { fecha: mejor[0], total: mejor[1] } : null, diaSemana: total ? porDiaSemana.indexOf(Math.max(...porDiaSemana)) : null,
+           necesario: por(g => tipoDeGasto(g) === "necesario"), gustos: por(g => tipoDeGasto(g) === "gusto"),
+           medios: Object.fromEntries([...Object.keys(MEDIOS_PAGO), ""].map(k => [k, por(g => (MEDIOS_PAGO[g.medio] ? g.medio : "") === k)])),
+           hormiga: por(g => g.total < HORMIGA), serie,
+           proyeccion: mes === mesDe(hoy) && corrido >= 3 ? Math.round(total / corrido * dim) : null };
+}
+/* Lo gastado en cada uno de los n meses que terminan en `hasta`, sin lo que ya está en la casa */
+function totalesPorMes(gastos, hasta, n){
+  return Array.from({ length: n }, (_, i) => {
+    const mes = sumarMeses(hasta, i - n + 1);
+    return { mes, total: suma(gastosDelMes(gastos, mes).filter(x => !x.g.deCasa), x => x.g.total) };
+  });
 }
 
 /* ---- hábitos de finanzas ----
@@ -1403,8 +1486,8 @@ function analisisGastos(gastos, desde, hasta){
    plata no tiene fin de semana: se miran todos los días. */
 const HABITOS_FINANZAS = {
   anotar:       { nombre: "Anotar lo que gasto", hora: "21:00",
-                  que: "Verde el día que cargás un gasto de alimentos. Si no gastaste, lo marcás vos. A las 21 te avisa si no anotaste." },
-  sinDeuda:     { nombre: "Sin deuda nueva", que: "Verde cada día; amarillo el día que cargás una deuda nueva o un adelanto." },
+                  que: "Verde el día que cargás un gasto. Si no gastaste, lo marcás vos. A las 21 te avisa si no anotaste." },
+  sinDeuda:     { nombre: "Sin deuda nueva", que: "Verde cada día; amarillo el día que cargás una deuda nueva, un adelanto o una compra en cuotas." },
   ritmo:        { nombre: "Alimentos al ritmo", que: "Verde mientras lo gastado en el mes no se adelanta más de una semana al presupuesto." },
   vencimientos: { nombre: "Vencimientos al día", que: "Verde si no hay ninguna cuota ni gasto vencido sin marcar como pagado." }
 };
@@ -1415,7 +1498,10 @@ function topeRitmo(presupuesto, ds){
   return Math.round(presupuesto * Math.min(1, (d.getDate() + 7) / dim));
 }
 function gastadoHasta(gastos, ds){ return suma(gastosDelMes(gastos, mesDe(ds), "alimentos").filter(x => x.fecha <= ds && !x.g.deCasa), x => x.g.total); }
-function deudaNuevaEl(F, ds){ return [...(F?.deudas || []), ...(F?.movimientos || []).filter(m => m.deuda)].some(x => x.alta === ds); }
+function deudaNuevaEl(F, ds){
+  return [...(F?.deudas || []), ...(F?.movimientos || []).filter(m => m.deuda)].some(x => x.alta === ds)
+    || (F?.gastos?.[ds] || []).some(g => g.medio === "cuotas");   // comprar en cuotas también es deuda nueva
+}
 /* ¿Hay algo de este mes o del anterior que ya venció y no está marcado como pagado? */
 function vencidoSinPagar(F, hoy){
   return [sumarMeses(mesDe(hoy), -1), mesDe(hoy)].some(mes => !(F?.inicio > mes)
@@ -1635,7 +1721,7 @@ const view = document.getElementById("view");
 
 function render(){
   if(marcarPorFinanzas(S, TODAY)) save();   // los hábitos de finanzas siguen a lo que se cargó
-  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, finanzas:vFinanzas, mas:vMas })[TAB]();
+  view.innerHTML = ({ hoy:vHoy, mes:vMes, semana:vSemana, pasos:vPasos, comida:vComida, gastos:vGastos, finanzas:vFinanzas, mas:vMas })[TAB]();
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.tab === TAB)));
   bind();
   window.scrollTo(0,0);
@@ -2323,16 +2409,17 @@ function comidaAMano(fecha = TODAY){
 }
 
 /* ---------- finanzas: el mes, vencimientos, alimentos, colchón y deudas ---------- */
-let FIN_MES = null, ALIM_MES = null;   // el mes de arriba y el de Alimentos; null = el que toca
+let FIN_MES = null;                    // el mes de arriba; null = el que toca
 const HORA_AVISO_VENC = "10:00";       // el aviso del día antes de cada vencimiento
 function fin(){
   const f = S.finanzas ||= {};
   for(const k of ["ingresos", "fijos", "deudas", "movimientos", "colchon"]) f[k] ||= [];
-  f.gastos ||= {}; f.pagos ||= {};
+  f.gastos ||= {}; f.pagos ||= {}; f.cierres ||= {};
+  f.presupuestos ||= presupuestosIniciales(f);
   return f;
 }
 function aPesos(n){ return (n < 0 ? "− $ " : "$ ") + fmt(Math.abs(Math.round(n))); }
-function conSigno(n){ return (n < 0 ? "− $ " : "+ $ ") + fmt(Math.abs(Math.round(n))); }
+function conSigno(n){ return (n < 0 ? "− $ " : n > 0 ? "+ $ " : "$ ") + fmt(Math.abs(Math.round(n))); }
 function enMillones(n, signo){ return (n < 0 ? "−" : signo && n > 0 ? "+" : "") + (Math.abs(n) / 1e6).toLocaleString("es-AR", { maximumFractionDigits: 2 }); }
 function nombreMes(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES[m - 1]} ${y}`; }
 function mesCorto(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES_CORTOS[m - 1]} ${String(y).slice(2)}`; }
@@ -2344,7 +2431,6 @@ function mesDelPlan(F){ const m = mesDe(TODAY); return F.inicio > m ? F.inicio :
 function vFinanzas(){
   const F = fin(), conPlan = F.ingresos.length + F.fijos.length + F.deudas.length > 0;
   return alertaVencimientosHTML() + (conPlan ? rumboHTML(F) + mesFinHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML())
-    + gastosHTML(F, "alimentos") + gastosHTML(F, "gastos") + analisisHTML(F)
     + (conPlan ? colchonHTML(F) + deudasHTML(F) + proximosHTML(F) : "") + habitosFinHTML() + datosFinHTML(conPlan);
 }
 function bienvenidaFinHTML(){
@@ -2369,8 +2455,8 @@ function mesFinHTML(F){
     <div class="cuentas">
       ${fila("Entra", suma(r.ingresos, i => i.monto), "flista", 'data-k="ingresos"')}
       ${fila("Casa", -r.casa, "flista", 'data-k="fijos"')}
-      ${fila(r.gastado > r.presupuesto ? "Alimentos (te pasaste)" : "Alimentos", -r.alimentos, "fpres", 'data-r="alimentos"')}
-      ${fila(r.presupuestoGastos && r.gastadoGastos > r.presupuestoGastos ? "Gastos (te pasaste)" : "Gastos", -r.gastos, "fpres", 'data-r="gastos"')}
+      ${fila(r.gastado > r.presupuesto ? "Alimentos (te pasaste)" : "Alimentos", -r.alimentos, "irGastos", "")}
+      ${fila(r.presupuestoGastos && r.gastadoGastos > r.presupuestoGastos ? "Otros gastos (te pasaste)" : "Otros gastos", -r.gastos, "irGastos", "")}
       ${fila("Cuotas", -r.cuotas, "flista", 'data-k="deudas"')}</div>
     ${r.movimientos.length ? `<p class="frec-t">Solo en ${nombre}</p>${r.movimientos.map(m => `<div class="fila"><span class="n">${esc(m.nombre)}</span>
       <b>${conSigno(m.monto)}</b><button class="x" data-act="fborrarMov" data-id="${m.id}" aria-label="Sacar ${esc(m.nombre)}">✕</button></div>`).join("")}` : ""}
@@ -2405,70 +2491,6 @@ function alertaVencimientosHTML(){
   if(!lineas.length) return "";
   return `<div class="alert risk alerta-venc"><span class="ic">$</span><div>${lineas.join("<br>")}
     ${TAB === "finanzas" ? "" : `<br><button class="linkbtn" data-act="irFinanzas">Ir a Finanzas</button>`}</div></div>`;
-}
-/* Alimentos y gastos, cada uno con lo del mes, su presupuesto y su lista. Las dos
-   tarjetas se mueven juntas de mes. Antes del plan, lo gastado queda anotado pero
-   no hay presupuesto; sin presupuesto de gastos, se mide primero. */
-const CATEGORIA_POR_DEFECTO = { alimentos: "super", gastos: "otros" };
-function gastosHTML(F, rubro){
-  const mes = ALIM_MES || mesDe(TODAY), lista = gastosDelMes(F.gastos, mes, rubro).reverse(), alim = rubro === "alimentos";
-  const pres = alim ? presupuestoAlimentos(F) : presupuestoGastos(F), gastado = gastadoEnMes(F.gastos, mes, rubro);
-  const rit = ritmoAlimentos(pres, gastado, mes, TODAY), primero = Object.keys(F.gastos).sort()[0], antes = F.inicio > mes;
-  const sub = antes ? `en ${MESES[Number(mes.slice(5)) - 1]}; el presupuesto arranca en ${MESES[Number(F.inicio.slice(5)) - 1]}`
-    : !pres ? `en ${MESES[Number(mes.slice(5)) - 1]} · sin presupuesto todavía`
-    : gastado <= pres ? `de ${aPesos(pres)} · quedan ${aPesos(pres - gastado)}` : `de ${aPesos(pres)} · te pasaste ${aPesos(gastado - pres)}`;
-  const que = alim ? "alimentos" : "gastos";
-  return `<div class="card ${alim ? "alimentos" : "gastos-var"}"><div class="card-t cab"><span>${RUBROS[rubro]} · ${nombreMes(mes)}</span>
-      <button data-act="amover" data-n="-1" aria-label="Mes anterior"${!primero || mesDe(primero) >= mes ? " disabled" : ""}>‹</button>
-      <button data-act="amover" data-n="1" aria-label="Mes siguiente"${mes >= mesDe(TODAY) ? " disabled" : ""}>›</button></div>
-    ${heroInner(aPesos(gastado), sub)}${!antes && pres ? barra(gastado, pres, gastado <= pres ? "var(--ok)" : "var(--fail)") : ""}
-    ${!antes && pres && rit.dias >= 7 && rit.quedan > 0 ? `<p class="ritmo" style="margin:12px 0 0;font-size:14.5px">Para los ${rit.dias} días que quedan: unos <b>${aPesos(rit.porSemana)} por semana</b>.</p>` : ""}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px">
-      <button class="btn" data-act="fticket" data-r="${rubro}" style="margin:0">Foto del ticket</button>
-      <button class="btn ghost" data-act="fgaleria" data-r="${rubro}" style="margin:0">Elegir foto</button></div>
-    <button class="btn ghost" data-act="fmano" data-r="${rubro}">Agregar a mano</button>
-    ${lista.length ? `<div style="margin-top:6px">${lista.map(filaGasto).join("")}</div>`
-      : `<p style="margin:12px 0 0;color:var(--muted);font-size:13.5px">${mes === mesDe(TODAY) ? `Todavía no cargaste ${que} este mes.` : `Ese mes no cargaste ${que}.`}</p>`}
-    <p class="pie">${alim ? "Súper, verdulería, carnicería, delivery y kiosco." : "Salidas, transporte, suscripciones, regalos y gustos: lo que no es comida."}
-      ${pres ? `Presupuesto: ${aPesos(pres)} por mes.` : "Medilo un mes y después ponele un presupuesto."}
-      <button class="linkbtn" data-act="fpres" data-r="${rubro}" style="padding:0">${pres ? "Cambiar" : "Poner presupuesto"}</button></p></div>`;
-}
-function filaGasto({ g, fecha, i }){
-  const detalle = [nombreCategoria(g.categoria), g.items?.length ? `${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket` : "",
-                   g.deCasa ? "ya está en la casa" : ""].filter(Boolean).join(" · ");
-  return `<div class="fila"><button class="ce" data-act="fgasto" data-d="${fecha}" data-i="${i}" aria-label="Ver ${esc(g.comercio)}">
-      <span class="hm">${diaYMes(fecha)}</span><span class="n">${esc(g.comercio)}<small>${detalle}</small></span><b>${aPesos(g.total)}</b></button>
-    <button class="x" data-act="fborrarGasto" data-d="${fecha}" data-i="${i}" aria-label="Borrar ${esc(g.comercio)}">✕</button></div>`;
-}
-function selectCategoria(id, valor){
-  return `<select id="${id}">${Object.entries(RUBROS).map(([r, t]) => `<optgroup label="${t}">${Object.entries(CATEGORIAS_GASTO).filter(([, c]) => c.rubro === r)
-    .map(([k, c]) => `<option value="${k}"${k === valor ? " selected" : ""}>${c.nombre}</option>`).join("")}</optgroup>`).join("")}</select>`;
-}
-const CHECK_CASA = (id, marcado) => `<label class="chk"><input type="checkbox" id="${id}"${marcado ? " checked" : ""}> Ya está en un gasto de la casa: no suma de nuevo</label>`;
-
-/* ---- dónde se va la plata: por semana o por mes, para mirarlo los sábados ---- */
-let ANA_VISTA = "semana", ANA_REF = null;
-function analisisHTML(F){
-  const ref = ANA_REF || TODAY, { desde, hasta } = rangoPasos(ANA_VISTA, ref), previo = rangoPasos(ANA_VISTA, moverPasos(ANA_VISTA, ref, -1));
-  const a = analisisGastos(F.gastos, desde, hasta), b = analisisGastos(F.gastos, previo.desde, previo.hasta), semana = ANA_VISTA === "semana";
-  const antes = semana ? "la semana anterior" : "el mes anterior";
-  const cabeza = `<div class="card analisis"><div class="card-t">Dónde se va la plata</div>
-    <div class="chips">${[["semana", "Semana"], ["mes", "Mes"]].map(([k, t]) => `<button class="chip" data-act="avista" data-v="${k}" aria-pressed="${ANA_VISTA === k}">${t}</button>`).join("")}</div>
-    <div class="cab" style="margin:0 0 6px"><span style="font-size:14px;font-weight:600">${tituloPasos(ANA_VISTA, desde, hasta)}</span>
-      <button data-act="amov" data-n="-1" aria-label="${semana ? "Semana" : "Mes"} anterior">‹</button>
-      <button data-act="amov" data-n="1" aria-label="${semana ? "Semana" : "Mes"} siguiente"${hasta >= TODAY ? " disabled" : ""}>›</button></div>`;
-  if(!a.n) return cabeza + `<p style="margin:0;color:var(--muted);font-size:13.5px">No cargaste gastos ${semana ? "esa semana" : "ese mes"}.</p></div>`;
-  const prev = Object.fromEntries(b.categorias.map(c => [c.categoria, c.total])), max = a.categorias[0].total, dif = a.total - b.total;
-  const pct = n => Math.round(100 * n / a.total);
-  return cabeza + heroInner(aPesos(a.total), `${semana ? "en la semana" : "en el mes"} · alimentos ${aPesos(a.alimentos)} · gastos ${aPesos(a.gastos)}`)
-    + (b.n ? `<p class="comparado" style="margin:10px 0 4px;font-size:14px">${dif === 0 ? "Igual que" : dif > 0 ? `${aPesos(dif)} más que` : `${aPesos(-dif)} menos que`} ${antes}, entera (${aPesos(b.total)}).</p>` : "")
-    + a.categorias.map(c => `<div class="cat"><div class="cat-t"><span>${esc(nombreCategoria(c.categoria))} <small>${c.n} ${c.n === 1 ? "gasto" : "gastos"}</small></span><b>${aPesos(c.total)}</b></div>
-      <div class="cat-b"><i style="width:${Math.max(2, Math.round(100 * c.total / max))}%"></i></div>
-      <small class="cat-s">${pct(c.total)} % del total${b.n ? ` · ${antes}: ${aPesos(prev[c.categoria] || 0)}` : ""}</small></div>`).join("")
-    + `<p class="hormiga">Gastos hormiga: <b>${a.hormiga.n}</b> de menos de ${aPesos(HORMIGA)} que suman <b>${aPesos(a.hormiga.total)}</b>, el ${pct(a.hormiga.total)} % de lo gastado.${b.n
-      ? ` ${cap(antes)}: ${b.hormiga.n} por ${aPesos(b.hormiga.total)}.` : ""}</p>`
-    + `<p class="frec-t">Dónde más gastaste</p>${a.comercios.slice(0, 3).map(c => `<div class="renglon"><span>${esc(c.nombre)} <small style="color:var(--muted)">${c.n} ${c.n === 1 ? "vez" : "veces"}</small></span><b>${aPesos(c.total)}</b></div>`).join("")}`
-    + `<p class="pie">${a.deCasa ? `${aPesos(a.deCasa)} de esto ya estaba en los gastos de la casa: se ve acá, pero no suma de nuevo al mes. ` : ""}Los sábados lo miramos con el respaldo para ver dónde mejorar.</p></div>`;
 }
 function colchonHTML(F){
   const total = totalColchon(F), gasto = gastoMensual(F), meses = gasto ? Math.floor(total / gasto * 10) / 10 : 0;
@@ -2508,14 +2530,7 @@ function proximosHTML(F){
     </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">En millones de pesos, con lo cargado hoy. Tocá un mes para verlo arriba.</p></details></div>`;
 }
 function datosFinHTML(conPlan){
-  const conClave = !!claveIA();
-  return `<div class="card"><div class="card-t">Tickets con Claude</div>
-    <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">La foto del ticket se manda a Claude Opus 5.5 (Anthropic), que lee el comercio, la fecha,
-      cada renglón y el total; antes de guardar podés corregirlo. La foto no se guarda en la app. Cuesta unos 2 a 4 centavos de dólar por ticket,
-      con la misma clave de Anthropic que Comida.</p>
-    <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
-    <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>
-  ${conPlan ? `<div class="card"><div class="card-t">Tus datos</div>
+  return `${conPlan ? `<div class="card"><div class="card-t">Tus datos</div>
     <p style="margin:0;font-size:13px;color:var(--ink-2);line-height:1.5">Quedan en este celular y viajan en el respaldo (Más → Exportar respaldo).</p>
     <button class="btn ghost" data-act="fimport">Importar finanzas (.json)</button></div>` : ""}`;
 }
@@ -2688,36 +2703,261 @@ function marcarPagado(mes, clave){
   if(!l.length) delete F.pagos[mes];
   save(); render();
 }
-function editarPresupuesto(rubro = "alimentos"){
-  const alim = rubro === "alimentos";
-  sheet(`<h3>Presupuesto de ${alim ? "alimentos" : "gastos"}</h3><p class="sub">${alim ? "Lo que querés gastar por mes en comida: súper, verdulería, carnicería, delivery."
-      : "Lo que querés gastar por mes en salidas, transporte, suscripciones, regalos y gustos. Con 0 queda sin presupuesto y cuenta solo lo que cargás."}</p>
-    <input type="number" id="presu" inputmode="numeric" min="0" step="1000" value="${alim ? presupuestoAlimentos(fin()) : presupuestoGastos(fin())}" aria-label="Presupuesto por mes">
-    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
-  const inp = modal.querySelector("#presu"); inp.focus(); inp.select();
-  modal.querySelector('[data-x="c"]').onclick = closeSheet;
-  modal.querySelector('[data-x="o"]').onclick = () => {
-    const n = Math.round(Number(inp.value));
-    if(inp.value === "" || !(n >= 0 && n <= 1e9)){ toast("Poné cuánto por mes"); return; }
-    fin()[alim ? "presupuestoAlimentos" : "presupuestoGastos"] = n; save(); closeSheet(); render();
-    toast(n ? `Presupuesto de ${alim ? "alimentos" : "gastos"}: ${aPesos(n)} por mes` : "Gastos sin presupuesto");
+/* ---------- GASTOS: administración de gastos ----------
+   Arriba el mes (lo gastado contra el presupuesto, necesidad o gusto, el ritmo y a
+   dónde llega), después cargar, el presupuesto por categoría, los movimientos día
+   por día, dónde se va la plata, el cierre del mes y, al final, cómo vamos en
+   gráficos y estadísticas. */
+let GASTOS_MES = null;                 // el mes que se ve; null = el de hoy
+let ANA_VISTA = "semana", ANA_REF = null, GASTOS_DIAS = [], GASTOS_MESES = [];
+const MEDIOS_CORTO = { debito: "débito o efectivo", tarjeta: "tarjeta", cuotas: "en cuotas" };
+function vGastos(){
+  const F = fin(), mes = GASTOS_MES || mesDe(TODAY);
+  return navGastos(F, mes) + resumenGastosHTML(F, mes) + cargarGastoHTML() + sobresHTML(F, mes) + diarioHTML(F, mes)
+    + analisisHTML(F) + cierreHTML(F, mes) + comoVamosHTML(F, mes);
+}
+function navGastos(F, mes){
+  const primero = Object.keys(F.gastos).sort()[0];
+  return `<div class="mnav"><button data-act="gmes" data-n="-1" aria-label="Mes anterior"${!primero || mesDe(primero) >= mes ? " disabled" : ""}>‹</button>
+    <b>${nombreMes(mes)}</b><button data-act="gmes" data-n="1" aria-label="Mes siguiente"${mes >= mesDe(TODAY) ? " disabled" : ""}>›</button></div>`;
+}
+const presupuestoTotal = F => presupuestoAlimentos(F) + presupuestoGastos(F);
+function resumenGastosHTML(F, mes){
+  const e = estadisticasGastos(F.gastos, mes, TODAY), pres = presupuestoTotal(F), antes = F.inicio > mes, nombre = MESES[Number(mes.slice(5)) - 1];
+  const rit = ritmoAlimentos(pres, e.total, mes, TODAY), pct = n => e.total ? Math.round(100 * n / e.total) : 0;
+  const deCasa = suma(gastosDelMes(F.gastos, mes).filter(x => x.g.deCasa), x => x.g.total);
+  const sub = antes ? `en ${nombre}; el presupuesto arranca en ${MESES[Number(F.inicio.slice(5)) - 1]}` : !pres ? `en ${nombre} · sin presupuesto`
+    : e.total <= pres ? `de ${aPesos(pres)} · quedan ${aPesos(pres - e.total)}` : `de ${aPesos(pres)} · te pasaste ${aPesos(e.total - pres)}`;
+  return `<div class="card gastos-mes"><div class="card-t">Administración de gastos</div>${heroInner(aPesos(e.total), sub)}
+    ${!antes && pres ? barra(e.total, pres, e.total <= pres ? "var(--ok)" : "var(--fail)") : ""}
+    ${e.total ? `<p class="tipos" style="margin:12px 0 0;font-size:14.5px">Necesario <b>${aPesos(e.necesario)}</b> (${pct(e.necesario)} %) · Gustos <b>${aPesos(e.gustos)}</b> (${pct(e.gustos)} %)</p>` : ""}
+    ${!antes && pres && rit.dias >= 7 && rit.quedan > 0 ? `<p class="ritmo" style="margin:8px 0 0;font-size:14.5px">Para los ${rit.dias} días que quedan: unos <b>${aPesos(rit.porSemana)} por semana</b>.</p>` : ""}
+    ${!antes && pres && e.proyeccion != null ? `<p class="proyeccion" style="margin:8px 0 0;font-size:14.5px">A este ritmo terminás el mes en <b>${aPesos(e.proyeccion)}</b>, el ${Math.round(100 * e.proyeccion / pres)} % del presupuesto.</p>` : ""}
+    ${deCasa ? `<p class="pie">Además, ${aPesos(deCasa)} que ya están en los gastos de la casa: se ven, pero no suman.</p>` : ""}</div>`;
+}
+function cargarGastoHTML(){
+  const conClave = !!claveIA();
+  return `<div class="card cargar"><div class="card-t">Cargar un gasto</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <button class="btn" data-act="fticket" style="margin:0">Foto del ticket</button>
+      <button class="btn ghost" data-act="fgaleria" style="margin:0">Elegir foto</button></div>
+    <button class="btn ghost" data-act="fmano">Agregar a mano</button>
+    <p class="pie">${conClave ? "Con la foto, Claude Opus 5.5 lee el comercio, la fecha, la categoría, con qué pagaste y cada renglón; antes de guardar lo corregís. La foto no se guarda. Unos 2 a 4 centavos de dólar por ticket, con la clave de Anthropic de este celular."
+      : "Para leer tickets y comprobantes con Claude falta tu clave de Anthropic (platform.claude.com → Claves de API)."}
+      <button class="linkbtn" data-act="cclave" style="padding:0">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></p></div>`;
+}
+/* Presupuesto por categoría: lo gastado, lo que queda o cuánto se pasó */
+function sobresHTML(F, mes){
+  const s = sobresDelMes(F, mes);
+  const fila = x => {
+    const pct = x.presupuesto ? Math.round(100 * x.gastado / x.presupuesto) : 0, pasado = x.presupuesto && x.gastado > x.presupuesto;
+    return `<div class="cat sobre"><div class="cat-t"><span>${x.nombre} <small>${x.categoria ? x.tipo : "elegí la categoría en los movimientos"}</small></span>
+        <b>${aPesos(x.gastado)}${x.presupuesto ? ` <small>de ${aPesos(x.presupuesto)}</small>` : ""}</b></div>
+      ${x.presupuesto ? `<div class="cat-b"><i style="width:${Math.min(100, pct)}%;background:${pasado ? "var(--fail)" : "var(--ok)"}"></i></div>` : ""}
+      <small class="cat-s${pasado ? " warn" : ""}">${!x.presupuesto ? "sin presupuesto" : pasado ? `te pasaste ${aPesos(x.gastado - x.presupuesto)} (+${pct - 100} %)`
+        : `quedan ${aPesos(x.presupuesto - x.gastado)} · ${pct} % usado`}</small></div>`;
   };
+  const grupo = r => {
+    const l = s.filter(x => x.rubro === r);
+    const pres = suma(l, x => x.presupuesto);
+    return l.length ? `<p class="frec-t">${RUBROS[r]} · ${aPesos(suma(l, x => x.gastado))}${pres ? ` de ${aPesos(pres)}` : " · sin presupuesto"}</p>${l.map(fila).join("")}` : "";
+  };
+  return `<div class="card sobres"><div class="card-t">Presupuesto por categoría</div>${grupo("alimentos")}${grupo("gastos")}
+    ${s.length ? "" : `<p style="margin:0;color:var(--muted);font-size:13.5px">Todavía no hay presupuestos ni gastos este mes.</p>`}
+    <button class="btn ghost" data-act="gpres">Cambiar presupuestos</button></div>`;
+}
+/* El libro diario: los gastos del mes, de hoy para atrás, con el total de cada día */
+function diarioHTML(F, mes){
+  const l = gastosDelMes(F.gastos, mes), dias = [...new Set(l.map(x => x.fecha))].reverse();
+  return `<div class="card diario"><div class="card-t">Movimientos de ${MESES[Number(mes.slice(5)) - 1]}</div>
+    ${dias.length ? dias.map(d => { const del = l.filter(x => x.fecha === d);
+      return `<p class="frec-t">${cap(fechaCorta(d))} · ${aPesos(suma(del.filter(x => !x.g.deCasa), x => x.g.total))}</p>${del.map(filaGasto).join("")}`; }).join("")
+      : `<p style="margin:0;color:var(--muted);font-size:13.5px">${mes === mesDe(TODAY) ? "Todavía no cargaste gastos este mes." : "Ese mes no cargaste gastos."}</p>`}</div>`;
+}
+function filaGasto({ g, fecha, i }){
+  const detalle = [nombreCategoria(g.categoria), MEDIOS_CORTO[g.medio] || "", g.items?.length ? `${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket` : "",
+                   g.deCasa ? "ya está en la casa" : ""].filter(Boolean).join(" · ");
+  return `<div class="fila"><button class="ce" data-act="fgasto" data-d="${fecha}" data-i="${i}" aria-label="Ver ${esc(g.comercio)}">
+      <span class="n">${esc(g.comercio)}<small>${detalle}</small></span><b>${aPesos(g.total)}</b></button>
+    <button class="x" data-act="fborrarGasto" data-d="${fecha}" data-i="${i}" aria-label="Borrar ${esc(g.comercio)}">✕</button></div>`;
+}
+function selectCategoria(id, valor){
+  return `<select id="${id}">${Object.entries(RUBROS).map(([r, t]) => `<optgroup label="${t}">${Object.entries(CATEGORIAS_GASTO).filter(([, c]) => c.rubro === r)
+    .map(([k, c]) => `<option value="${k}"${k === valor ? " selected" : ""}>${c.nombre} (${c.tipo})</option>`).join("")}</optgroup>`).join("")}</select>`;
+}
+function selectMedio(id, valor){
+  return `<select id="${id}"><option value=""${valor ? "" : " selected"}>No sé</option>${Object.entries(MEDIOS_PAGO)
+    .map(([k, t]) => `<option value="${k}"${k === valor ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+}
+const CHECK_CASA = (id, marcado) => `<label class="chk"><input type="checkbox" id="${id}"${marcado ? " checked" : ""}> Ya está en un gasto de la casa: no suma de nuevo</label>`;
+const camposGasto = (p, g) => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+    <div><label class="campo" for="${p}Cat">Categoría</label>${selectCategoria(p + "Cat", g.categoria)}</div>
+    <div><label class="campo" for="${p}Medio">Con qué pagaste</label>${selectMedio(p + "Medio", g.medio)}</div></div>${CHECK_CASA(p + "Casa", g.deCasa)}`;
+const leerCamposGasto = (p, $) => ({ categoria: $(`#${p}Cat`).value, medio: $(`#${p}Medio`).value, deCasa: $(`#${p}Casa`).checked });
+/* Pasa categoría, medio y "ya en la casa" al gasto: lo que no se eligió no se guarda */
+function ponerCampos(g, c){
+  g.categoria = c.categoria;
+  if(c.medio) g.medio = c.medio; else delete g.medio;
+  if(c.deCasa) g.deCasa = true; else delete g.deCasa;
+  return g;
 }
 
-/* ---- gastos: a mano o desde la foto del ticket o del comprobante ---- */
+/* ---- dónde se va la plata: por semana o por mes, para mirarlo los sábados ---- */
+function analisisHTML(F){
+  const ref = ANA_REF || TODAY, { desde, hasta } = rangoPasos(ANA_VISTA, ref), previo = rangoPasos(ANA_VISTA, moverPasos(ANA_VISTA, ref, -1));
+  const a = analisisGastos(F.gastos, desde, hasta), b = analisisGastos(F.gastos, previo.desde, previo.hasta), semana = ANA_VISTA === "semana";
+  const antes = semana ? "la semana anterior" : "el mes anterior";
+  const cabeza = `<div class="card analisis"><div class="card-t">Dónde se va la plata</div>
+    <div class="chips">${[["semana", "Semana"], ["mes", "Mes"]].map(([k, t]) => `<button class="chip" data-act="avista" data-v="${k}" aria-pressed="${ANA_VISTA === k}">${t}</button>`).join("")}</div>
+    <div class="cab" style="margin:0 0 6px"><span style="font-size:14px;font-weight:600">${tituloPasos(ANA_VISTA, desde, hasta)}</span>
+      <button data-act="amov" data-n="-1" aria-label="${semana ? "Semana" : "Mes"} anterior">‹</button>
+      <button data-act="amov" data-n="1" aria-label="${semana ? "Semana" : "Mes"} siguiente"${hasta >= TODAY ? " disabled" : ""}>›</button></div>`;
+  if(!a.n) return cabeza + `<p style="margin:0;color:var(--muted);font-size:13.5px">No cargaste gastos ${semana ? "esa semana" : "ese mes"}.</p></div>`;
+  const prev = Object.fromEntries(b.categorias.map(c => [c.categoria, c.total])), max = a.categorias[0].total, dif = a.total - b.total;
+  const pct = n => Math.round(100 * n / a.total);
+  return cabeza + heroInner(aPesos(a.total), `${semana ? "en la semana" : "en el mes"} · alimentos ${aPesos(a.alimentos)} · otros ${aPesos(a.gastos)} · gustos ${pct(a.gustos)} %`)
+    + (b.n ? `<p class="comparado" style="margin:10px 0 4px;font-size:14px">${dif === 0 ? "Igual que" : dif > 0 ? `${aPesos(dif)} más que` : `${aPesos(-dif)} menos que`} ${antes}, entera (${aPesos(b.total)}).</p>` : "")
+    + a.categorias.map(c => `<div class="cat"><div class="cat-t"><span>${esc(nombreCategoria(c.categoria))} <small>${c.n} ${c.n === 1 ? "gasto" : "gastos"}</small></span><b>${aPesos(c.total)}</b></div>
+      <div class="cat-b"><i style="width:${Math.max(2, Math.round(100 * c.total / max))}%"></i></div>
+      <small class="cat-s">${pct(c.total)} % del total${b.n ? ` · ${antes}: ${aPesos(prev[c.categoria] || 0)}` : ""}</small></div>`).join("")
+    + `<p class="hormiga">Gastos hormiga: <b>${a.hormiga.n}</b> de menos de ${aPesos(HORMIGA)} que suman <b>${aPesos(a.hormiga.total)}</b>, el ${pct(a.hormiga.total)} % de lo gastado.${b.n
+      ? ` ${cap(antes)}: ${b.hormiga.n} por ${aPesos(b.hormiga.total)}.` : ""}</p>`
+    + `<p class="frec-t">Dónde más gastaste</p>${a.comercios.slice(0, 3).map(c => `<div class="renglon"><span>${esc(c.nombre)} <small style="color:var(--muted)">${c.n} ${c.n === 1 ? "vez" : "veces"}</small></span><b>${aPesos(c.total)}</b></div>`).join("")}`
+    + `<p class="pie">${a.deCasa ? `${aPesos(a.deCasa)} de esto ya estaba en los gastos de la casa: se ve acá, pero no suma de nuevo al mes. ` : ""}Los sábados lo miramos con el respaldo para ver dónde mejorar.</p></div>`;
+}
+
+/* ---- cierre del mes: lo que se controla el último día ---- */
+const PASOS_CIERRE = [["conciliado", "Comparé con los resúmenes de la tarjeta y de Mercado Pago, y cargué lo que faltaba"],
+                      ["desvios", "Revisé dónde me pasé y por qué"],
+                      ["presupuesto", "Ajusté el presupuesto del mes que viene"]];
+function cierreHTML(F, mes){
+  const c = F.cierres[mes] || {}, hechos = PASOS_CIERRE.filter(([k]) => c[k]).length, e = estadisticasGastos(F.gastos, mes, TODAY), pres = presupuestoTotal(F);
+  const pasados = sobresDelMes(F, mes).filter(x => x.presupuesto && x.gastado > x.presupuesto).sort((a, b) => (b.gastado - b.presupuesto) - (a.gastado - a.presupuesto));
+  const pct = n => e.total ? Math.round(100 * n / e.total) : 0, temprano = mes === mesDe(TODAY) && parseISO(TODAY).getDate() < 25;
+  return `<div class="card cierre"><div class="card-t">Cierre de ${MESES[Number(mes.slice(5)) - 1]} · ${hechos} de ${PASOS_CIERRE.length}</div>
+    ${temprano ? `<p style="margin:0 0 4px;font-size:13px;color:var(--muted)">Se hace el último día del mes o en los primeros del siguiente.</p>` : ""}
+    ${PASOS_CIERRE.map(([k, t]) => `<div class="fila${c[k] ? " pagado" : ""}"><span class="n">${t}</span>
+      <button class="pq${c[k] ? " ok" : ""}" data-act="gcierre" data-k="${k}" data-m="${mes}" aria-pressed="${!!c[k]}" aria-label="${t}">✓</button></div>`).join("")}
+    ${pasados.length ? `<p class="pie">Te pasaste en ${pasados.slice(0, 3).map(x => `${x.nombre} (+${aPesos(x.gastado - x.presupuesto)})`).join(", ")}.</p>` : ""}
+    ${hechos === PASOS_CIERRE.length ? `<p class="cerrado" style="margin:10px 0 0;font-size:14.5px"><b>Mes cerrado ✓</b> Gastaste ${aPesos(e.total)}${pres ? ` de ${aPesos(pres)} (${Math.round(100 * e.total / pres)} %)` : ""};
+      gustos ${pct(e.gustos)} %; con tarjeta ${pct(e.medios.tarjeta + e.medios.cuotas)} %.</p>` : ""}
+    <button class="btn ghost" data-act="gpres">Cambiar presupuestos</button></div>`;
+}
+
+/* ---- cómo vamos: gráficos y estadísticas, porque lo que no se mide no se mejora ---- */
+function pesosCorto(n){ return n >= 1e6 ? String(Math.round(n / 1e5) / 10).replace(".", ",") + " M" : n >= 1000 ? Math.round(n / 1000) + " mil" : String(n); }
+/* Escala de un eje: tope redondo, con 3 a 6 líneas */
+function escalaPesos(max){
+  const pasos = [1e4, 2e4, 25e3, 5e4, 1e5, 2e5, 25e4, 5e5, 1e6, 2e6, 25e5, 5e6, 1e7];
+  const paso = pasos.find(p => max / p <= 5) || 1e7;
+  return { paso, tope: Math.max(paso, Math.ceil(max / paso) * paso) };
+}
+/* Lo gastado acumulado día por día contra el presupuesto repartido parejo en el mes */
+function curvaGastos(serie, pres){
+  const W = 340, H = 172, L = 40, R = 8, T = 12, B = 20, n = serie.length;
+  const ultimo = serie.filter(x => x.acumulado != null).at(-1)?.acumulado || 0, { paso, tope } = escalaPesos(Math.max(pres, ultimo, 1));
+  const x = i => L + (W - L - R) * (i / (n - 1)), y = v => T + (H - T - B) * (1 - v / tope);
+  let fondo = "";
+  for(let v = 0; v <= tope; v += paso) fondo += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`
+    + `<text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" class="eje">${pesosCorto(v)}</text>`;
+  const ejes = [0, 9, 19, n - 1].map(i => `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" class="eje">${i + 1}</text>`).join("");
+  const ritmo = pres ? `<line x1="${x(0)}" y1="${y(pres / n)}" x2="${x(n - 1)}" y2="${y(pres)}" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round"/>` : "";
+  const puntos = serie.map((s, i) => s.acumulado == null ? null : `${x(i).toFixed(1)},${y(s.acumulado).toFixed(1)}`).filter(Boolean);
+  const linea = puntos.length > 1 ? `<polyline points="${puntos.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
+  const fin = puntos.length ? `<circle cx="${puntos.at(-1).split(",")[0]}" cy="${puntos.at(-1).split(",")[1]}" r="4" fill="var(--ink)" stroke="var(--surface)" stroke-width="2"/>` : "";
+  const banda = (W - L - R) / (n - 1);
+  const toques = serie.map((s, i) => `<rect data-act="gdia" data-i="${i}" x="${x(i) - banda / 2}" y="${T}" width="${banda}" height="${H - T - B}" fill="transparent"><title>${esc(GASTOS_DIAS[i] || "")}</title></rect>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gastado acumulado en el mes contra el presupuesto">${fondo}${ritmo}${linea}${fin}${ejes}${toques}</svg>`;
+}
+/* Lo gastado en cada uno de los últimos meses, con la línea del presupuesto de hoy */
+function barrasMeses(meses, pres){
+  const W = 340, H = 150, L = 40, R = 8, T = 12, B = 20, { paso, tope } = escalaPesos(Math.max(pres, ...meses.map(m => m.total), 1));
+  const y = v => T + (H - T - B) * (1 - v / tope), banda = (W - L - R) / meses.length, ancho = Math.min(28, banda * .55);
+  let fondo = "";
+  for(let v = 0; v <= tope; v += paso) fondo += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`
+    + `<text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" class="eje">${pesosCorto(v)}</text>`;
+  const barras = meses.map((m, i) => {
+    const cx = L + banda * (i + .5), x0 = cx - ancho / 2, y0 = y(0), y1 = Math.min(y(m.total), y0 - 1), r = Math.min(4, ancho / 2, y0 - y1);
+    return (m.total > 0 ? `<path d="M${x0},${y0}V${y1 + r}Q${x0},${y1} ${x0 + r},${y1}H${x0 + ancho - r}Q${x0 + ancho},${y1} ${x0 + ancho},${y1 + r}V${y0}Z" fill="var(--ink-2)"/>` : "")
+      + `<text x="${cx}" y="${H - 5}" text-anchor="middle" class="eje">${MESES_CORTOS[Number(m.mes.slice(5)) - 1]}</text>`
+      + `<rect data-act="gmesbar" data-i="${i}" x="${L + banda * i}" y="${T}" width="${banda}" height="${H - T - B}" fill="transparent"><title>${esc(GASTOS_MESES[i] || "")}</title></rect>`;
+  }).join("");
+  const linea = pres ? `<line x1="${L}" x2="${W - R}" y1="${y(pres)}" y2="${y(pres)}" stroke="var(--ink)" stroke-width="1" pointer-events="none"/>
+    <text x="${W - R}" y="${y(pres) - 4}" text-anchor="end" class="eje fuerte" stroke="var(--surface)" stroke-width="3" paint-order="stroke" pointer-events="none">Presupuesto ${pesosCorto(pres)}</text>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Lo gastado en los últimos meses">${fondo}${barras}${linea}</svg>`;
+}
+/* Una barra partida, con la cifra de cada parte al lado: un solo tono, de más a menos fuerte */
+const TONOS = [1, .62, .38, .2];
+function partes(lista, total){
+  const l = lista.filter(([, n]) => n > 0);
+  if(!l.length || !total) return "";
+  return `<div class="partes" role="img" aria-label="${l.map(([t, n]) => `${t} ${Math.round(100 * n / total)} %`).join(", ")}">${l.map(([, n], i) =>
+      `<i style="flex:${n};opacity:${TONOS[i]}"></i>`).join("")}</div>
+    ${l.map(([t, n], i) => `<div class="parte"><i style="opacity:${TONOS[i]}"></i><span>${t}</span><b>${Math.round(100 * n / total)} %</b><small>${aPesos(n)}</small></div>`).join("")}`;
+}
+function comoVamosHTML(F, mes){
+  const e = estadisticasGastos(F.gastos, mes, TODAY), pres = F.inicio > mes ? 0 : presupuestoTotal(F);
+  if(!e.n) return `<div class="card como-vamos"><div class="card-t">Cómo vamos</div>
+    <p style="margin:0;color:var(--muted);font-size:13.5px">Cuando cargues gastos, acá vas a ver cómo va el mes en gráficos y estadísticas.</p></div>`;
+  const ant = estadisticasGastos(F.gastos, sumarMeses(mes, -1), TODAY), meses = totalesPorMes(F.gastos, mes, 6), n = e.serie.length;
+  const pct = x => Math.round(100 * x / e.total);
+  GASTOS_DIAS = e.serie.map((s, i) => `${cap(fechaCorta(s.fecha))}: ${s.acumulado == null ? "todavía no pasó" : `gastaste ${aPesos(s.gastado)}, ${aPesos(s.acumulado)} en el mes`}`
+    + (pres ? ` · al ritmo del presupuesto, ${aPesos(Math.round(pres * (i + 1) / n))}` : ""));
+  GASTOS_MESES = meses.map(m => `${cap(nombreMes(m.mes))}: ${aPesos(m.total)}${pres ? ` · ${Math.round(100 * m.total / pres)} % del presupuesto de hoy` : ""}`);
+  const vsAnt = ant.total ? Math.round(100 * (e.total - ant.total) / ant.total) : null;
+  const tile = (valor, que) => `<div class="stat"><b>${valor}</b><span>${que}</span></div>`;
+  return `<div class="card como-vamos"><div class="card-t">Cómo vamos</div>
+    <p class="frec-t" style="margin-top:0">Gastado en el mes${pres ? ", contra el presupuesto" : ""}</p>
+    ${curvaGastos(e.serie, pres)}
+    <div class="leyenda"><span><i style="background:var(--ink)"></i>Gastado</span>${pres ? `<span><i style="background:var(--muted)"></i>Presupuesto al ritmo del mes</span>` : ""}</div>
+    <p class="pdet" id="gdet">Tocá un día para ver el detalle</p>
+    <p class="frec-t">Necesidad o gusto</p>${partes([["Necesario", e.necesario], ["Gustos", e.gustos]], e.total)}
+    <p class="frec-t">Con qué pagaste</p>${partes([["Débito o efectivo", e.medios.debito], ["Tarjeta en un pago", e.medios.tarjeta], ["Tarjeta en cuotas", e.medios.cuotas], ["Sin dato", e.medios[""]]], e.total)}
+    <p class="frec-t">Los últimos 6 meses</p>${barrasMeses(meses, pres)}
+    <p class="pdet" id="gdet2">Tocá un mes para ver el detalle</p>
+    <p class="frec-t">Estadísticas de ${MESES[Number(mes.slice(5)) - 1]}</p>
+    <div class="stats chico gastos-stats">
+      ${tile(aPesos(e.porDia), "Por día")}${tile(aPesos(e.ticket), "Por gasto")}${tile(fmt(e.n), "Gastos")}
+      ${tile(e.mejorDia ? `${parseISO(e.mejorDia.fecha).getDate()}/${parseISO(e.mejorDia.fecha).getMonth() + 1}` : "—", "Día de más gasto")}
+      ${tile(e.diaSemana != null ? DIAS[e.diaSemana] : "—", "Día que más gastás")}${tile(`${pct(e.hormiga)} %`, "Hormiga")}
+      ${tile(`${pct(e.gustos)} %`, "Gustos")}${tile(`${pct(e.medios.tarjeta + e.medios.cuotas)} %`, "Con tarjeta")}
+      ${tile(vsAnt == null ? "—" : `${vsAnt > 0 ? "+" : vsAnt < 0 ? "−" : ""}${Math.abs(vsAnt)} %`, "Vs. mes anterior")}</div>
+    <p class="pie">${e.mejorDia ? `El día de más gasto, el ${fechaCorta(e.mejorDia.fecha)}, se fueron ${aPesos(e.mejorDia.total)}. ` : ""}${e.proyeccion != null && pres ? `A este ritmo terminás en ${aPesos(e.proyeccion)}. ` : ""}Hormiga: gastos de menos de ${aPesos(HORMIGA)}.
+      Con tarjeta: en un pago y en cuotas. ${mes === mesDe(TODAY) ? "El mes anterior se compara entero." : ""}</p></div>`;
+}
+
+/* ---- presupuestos, carga y edición ---- */
+function editarPresupuestos(){
+  const F = fin(), p = F.presupuestos;
+  const campo = ([k, c]) => `<div class="frow-p"><label for="p_${k}">${c.nombre} <small>${c.tipo}</small></label>
+    <input type="number" id="p_${k}" inputmode="numeric" min="0" step="1000" value="${p[k] || ""}" placeholder="0"></div>`;
+  sheet(`<h3>Presupuesto por categoría</h3><p class="sub">Lo que querés gastar por mes en cada una; vacía, queda sin presupuesto. Lo que ya está en la casa no va acá.</p>
+    ${Object.keys(RUBROS).map(r => `<p class="frec-t">${RUBROS[r]}</p>${Object.entries(CATEGORIAS_GASTO).filter(([, c]) => c.rubro === r).map(campo).join("")}`).join("")}
+    <p class="pie" id="pTotal"></p>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const leer = () => Object.fromEntries(Object.keys(CATEGORIAS_GASTO).map(k => [k, Math.round(Number(modal.querySelector("#p_" + k).value) || 0)]));
+  const total = () => { const v = leer(); modal.querySelector("#pTotal").innerHTML = `Total: <b>${aPesos(suma(Object.values(v), n => n))}</b> por mes.`; return v; };
+  modal.querySelectorAll(".frow-p input").forEach(i => i.addEventListener("input", total)); total();
+  modal.querySelector('[data-x="c"]').onclick = closeSheet;
+  modal.querySelector('[data-x="o"]').onclick = () => {
+    const v = total();
+    if(!Object.values(v).every(n => n >= 0 && n <= 1e9)){ toast("Revisá los montos"); return; }
+    F.presupuestos = Object.fromEntries(Object.entries(v).filter(([, n]) => n > 0));
+    save(); closeSheet(); render(); toast(`Presupuesto del mes: ${aPesos(presupuestoTotal(F))}`);
+  };
+}
 function guardarGasto(g, fecha){
   (fin().gastos[fecha] ||= []).push({ id: uid(), ...g });
-  ALIM_MES = mesDe(fecha) === mesDe(TODAY) ? null : mesDe(fecha);
+  GASTOS_MES = mesDe(fecha) === mesDe(TODAY) ? null : mesDe(fecha);
   save(); render(); toast(`${g.comercio}: ${aPesos(g.total)} en ${nombreCategoria(g.categoria)}${g.deCasa ? " (ya está en la casa)" : ""}`);
 }
-function gastoAMano(rubro = "alimentos"){
-  sheet(`<h3>${rubro === "alimentos" ? "Agregar a alimentos" : "Agregar un gasto"}</h3>
-    <label class="campo" for="gNombre">Dónde o qué</label><input type="text" id="gNombre" maxlength="60" placeholder="${rubro === "alimentos" ? "Ej.: verdulería" : "Ej.: Didi al cine"}">
+function gastoAMano(){
+  sheet(`<h3>Agregar un gasto</h3>
+    <label class="campo" for="gNombre">Dónde o qué</label><input type="text" id="gNombre" maxlength="60" placeholder="Ej.: verdulería">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="gTotal">Cuánto</label><input type="number" id="gTotal" inputmode="numeric" min="0"></div>
       <div><label class="campo" for="gFecha">Cuándo</label><input type="date" id="gFecha" max="${TODAY}" value="${TODAY}"></div></div>
-    <label class="campo" for="gCat">Categoría</label>${selectCategoria("gCat", CATEGORIA_POR_DEFECTO[rubro])}
-    ${CHECK_CASA("gCasa")}
+    ${camposGasto("g", { categoria: "super", medio: "debito" })}
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
   const $ = q => modal.querySelector(q);
   $("#gNombre").focus();
@@ -2726,7 +2966,7 @@ function gastoAMano(rubro = "alimentos"){
     const comercio = $("#gNombre").value.trim(), total = Math.round(Number($("#gTotal").value)), fecha = $("#gFecha").value;
     if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
     if(!esFechaValida(fecha) || fecha > TODAY){ toast("Elegí un día de hasta hoy"); return; }
-    const g = { comercio: comercio.slice(0, 60), total, categoria: $("#gCat").value, origen: "mano", ...($("#gCasa").checked ? { deCasa: true } : {}) };
+    const g = ponerCampos({ comercio: comercio.slice(0, 60), total, origen: "mano" }, leerCamposGasto("g", $));
     closeSheet(); guardarGasto(g, fecha);
   };
 }
@@ -2742,8 +2982,7 @@ function editarGasto(fecha, i){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="eTotal">Total</label><input type="number" id="eTotal" inputmode="numeric" min="0" value="${g.total}"></div>
       <div><label class="campo" for="eFecha">Cuándo</label><input type="date" id="eFecha" max="${TODAY}" value="${fecha}"></div></div>
-    <label class="campo" for="eCat">Categoría</label>${selectCategoria("eCat", g.categoria || CATEGORIA_POR_DEFECTO.alimentos)}
-    ${CHECK_CASA("eCasa", g.deCasa)}
+    ${camposGasto("e", { ...g, categoria: g.categoria || "super" })}
     ${renglonesTicket(g.items)}${g.nota ? `<p class="detalle">${esc(g.nota)}</p>` : ""}
     <div class="row2"><button class="btn ghost danger" data-x="b">Borrar</button><button class="btn" data-x="o">Guardar</button></div>`);
   const $ = q => modal.querySelector(q);
@@ -2752,8 +2991,7 @@ function editarGasto(fecha, i){
     const comercio = $("#eComercio").value.trim(), total = Math.round(Number($("#eTotal").value)), nueva = $("#eFecha").value;
     if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
     if(!esFechaValida(nueva) || nueva > TODAY){ toast("Elegí un día de hasta hoy"); return; }
-    Object.assign(g, { comercio: comercio.slice(0, 60), total, categoria: $("#eCat").value });
-    if($("#eCasa").checked) g.deCasa = true; else delete g.deCasa;
+    ponerCampos(Object.assign(g, { comercio: comercio.slice(0, 60), total }), leerCamposGasto("e", $));
     if(nueva !== fecha){ borrarGasto(fecha, i); (F.gastos[nueva] ||= []).push(g); }
     save(); closeSheet(); render(); toast("Gasto actualizado");
   };
@@ -2766,6 +3004,12 @@ function borrarGasto(fecha, i){
 function confirmarBorradoGasto(fecha, i){
   const g = fin().gastos[fecha]?.[i]; if(!g) return;
   confirmSheet("¿Borrar este gasto?", `${g.comercio} · ${aPesos(g.total)}`, "Borrar", () => { borrarGasto(fecha, i); save(); render(); });
+}
+function marcarCierre(mes, k){
+  const F = fin(), c = F.cierres[mes] ||= {};
+  if(c[k]) delete c[k]; else c[k] = true;
+  if(!Object.keys(c).length) delete F.cierres[mes];
+  save(); render();
 }
 
 /* ---------- MÁS ---------- */
@@ -2959,16 +3203,20 @@ function onAct(e){
       FIN_MES = F.inicio && m < F.inicio ? F.inicio : m; render(); break;
     }
     case "fir": FIN_MES = el.dataset.m; render(); break;
-    case "amover": { const m = sumarMeses(ALIM_MES || mesDe(TODAY), +el.dataset.n); ALIM_MES = m >= mesDe(TODAY) ? null : m; render(); break; }
     case "fpagar": marcarPagado(el.dataset.m, el.dataset.k); break;
-    case "fticket": elegirFoto(true, [], "", fotoTicket(el.dataset.r || "alimentos")); break;
-    case "fgaleria": elegirFoto(false, [], "", fotoTicket(el.dataset.r || "alimentos")); break;
-    case "fmano": gastoAMano(el.dataset.r || "alimentos"); break;
+    case "fticket": elegirFoto(true, [], "", FOTO_TICKET); break;
+    case "fgaleria": elegirFoto(false, [], "", FOTO_TICKET); break;
+    case "fmano": gastoAMano(); break;
+    case "irGastos": TAB = "gastos"; GASTOS_MES = FIN_MES && FIN_MES <= mesDe(TODAY) ? FIN_MES : null; render(); break;
+    case "gmes": { const m = sumarMeses(GASTOS_MES || mesDe(TODAY), +el.dataset.n); GASTOS_MES = m >= mesDe(TODAY) ? null : m; render(); break; }
+    case "gpres": editarPresupuestos(); break;
+    case "gcierre": marcarCierre(el.dataset.m, el.dataset.k); break;
+    case "gdia": document.getElementById("gdet").textContent = GASTOS_DIAS[+el.dataset.i] || ""; break;
+    case "gmesbar": document.getElementById("gdet2").textContent = GASTOS_MESES[+el.dataset.i] || ""; break;
     case "avista": ANA_VISTA = el.dataset.v; ANA_REF = null; render(); break;
     case "amov": { const r = moverPasos(ANA_VISTA, ANA_REF || TODAY, +el.dataset.n); ANA_REF = r > TODAY ? TODAY : r; render(); break; }
     case "fgasto": editarGasto(el.dataset.d, +el.dataset.i); break;
     case "fborrarGasto": confirmarBorradoGasto(el.dataset.d, +el.dataset.i); break;
-    case "fpres": editarPresupuesto(el.dataset.r || "alimentos"); break;
     case "flista": verListaFin(el.dataset.k); break;
     case "fitem": editarItemFin(el.dataset.k, el.dataset.id || null); break;
     case "fmov": nuevoMovimiento(el.dataset.m); break;
@@ -3211,17 +3459,22 @@ function validarFinanzas(f){
       throw new Error(`En finanzas, "${k}" está roto.`);
   if(f.gastos != null && !(esObj(f.gastos) && Object.entries(f.gastos).every(([d, l]) => esFecha(d) && Array.isArray(l)
       && l.every(g => esObj(g) && typeof g.comercio === "string" && plata(g.total) && (g.items == null || Array.isArray(g.items))
-        && (g.categoria == null || Object.hasOwn(CATEGORIAS_GASTO, g.categoria)) && (g.deCasa == null || typeof g.deCasa === "boolean")))))
+        && (g.categoria == null || Object.hasOwn(CATEGORIAS_GASTO, g.categoria)) && (g.deCasa == null || typeof g.deCasa === "boolean")
+        && (g.medio == null || Object.hasOwn(MEDIOS_PAGO, g.medio))))))
     throw new Error(`En finanzas, "gastos" está roto.`);
   if(f.pagos != null && !(esObj(f.pagos) && Object.entries(f.pagos).every(([m, l]) => esMes(m) && Array.isArray(l) && l.every(x => typeof x === "string"))))
     throw new Error(`En finanzas, "pagos" está roto.`);
   if(f.inicio != null && !esMes(f.inicio)) throw new Error("En finanzas, el mes de inicio está roto.");
   if(f.presupuestoAlimentos != null && !plata(f.presupuestoAlimentos)) throw new Error("En finanzas, el presupuesto de alimentos está roto.");
   if(f.presupuestoGastos != null && !plata(f.presupuestoGastos)) throw new Error("En finanzas, el presupuesto de gastos está roto.");
+  if(f.presupuestos != null && !(esObj(f.presupuestos) && Object.entries(f.presupuestos).every(([k, n]) => Object.hasOwn(CATEGORIAS_GASTO, k) && plata(n))))
+    throw new Error("En finanzas, los presupuestos por categoría están rotos.");
+  if(f.cierres != null && !(esObj(f.cierres) && Object.entries(f.cierres).every(([m, c]) => esMes(m) && esObj(c) && Object.values(c).every(v => typeof v === "boolean"))))
+    throw new Error("En finanzas, los cierres del mes están rotos.");
 }
 /* Cómo quedan tus finanzas después de importar, sin tocar nada todavía, y qué decirte.
    { finanzas } reemplaza cada parte que trae (de un respaldo entero o de un archivo
-   de finanzas); lo que no trae, como los gastos de alimentos, queda.
+   de finanzas); lo que no trae, como los gastos, queda.
    { actualizar } cambia por id los ítems que ya están y suma los nuevos: sirve para
    cargar un resumen nuevo sin pisar lo que cargaste en el celular. */
 const LISTAS_FINANZAS = ["ingresos", "fijos", "deudas", "movimientos", "colchon"];
@@ -3237,7 +3490,7 @@ function finanzasImportadas(actual, data){
     partes.push(`Trae ${cuantos(k("ingresos"), "ingreso", "ingresos")}, ${cuantos(k("fijos"), "gasto de la casa", "gastos de la casa")}, `
       + `${cuantos(k("deudas"), "deuda", "deudas")}, ${cuantos(k("movimientos"), "movimiento", "movimientos")} y ${cuantos(k("colchon"), "ahorro", "ahorros")}`
       + `${n.inicio ? `, desde ${nombreMes(n.inicio)}` : ""}. Reemplaza eso en este celular; `
-      + (n.gastos ? "también los gastos de alimentos." : "tus gastos de alimentos quedan como están."));
+      + (n.gastos ? "también los gastos." : "tus gastos y presupuestos quedan como están."));
   }
   if(data.actualizar != null){
     if(!esObj(data.actualizar)) throw new Error(`El campo "actualizar" está roto.`);
@@ -3270,7 +3523,7 @@ function doImportFinanzas(){
         imp = finanzasImportadas(fin(), data);
       }catch(e){ toast("Archivo inválido: " + e.message); return; }
       confirmSheet(imp.reemplaza ? "¿Reemplazar tus finanzas?" : "¿Actualizar tus finanzas?", imp.texto, imp.reemplaza ? "Reemplazar" : "Actualizar", () => {
-        S.finanzas = imp.nuevo; fin(); FIN_MES = ALIM_MES = null;
+        S.finanzas = imp.nuevo; fin(); FIN_MES = GASTOS_MES = null;
         save(); TAB = "finanzas"; render(); toast("Finanzas importadas");
       });
     };
@@ -3612,7 +3865,7 @@ function editarClave(){
 /* Cámara (capture) o galería, hasta 4 fotos de la misma comida o del mismo ticket:
    la primera abre la hoja y desde ahí se suman las otras. En la app de Android,
    Capacitor abre la cámara del celular; la galería deja elegir varias a la vez.
-   `modo` dice qué se fotografía (FOTO_COMIDA o fotoTicket(rubro)). */
+   `modo` dice qué se fotografía (FOTO_COMIDA o FOTO_TICKET). */
 const MAX_FOTOS = 4;
 function elegirFoto(camara, previas = [], aclaracion = "", modo = FOTO_COMIDA){
   if(!claveIA()){ editarClave(); return; }
@@ -3756,7 +4009,8 @@ const PROMPT_TICKET = `Leés tickets, facturas y comprobantes de pago de Argenti
 - total: lo que se pagó al final, después de los descuentos. Si el ticket no lo muestra, sumá los renglones.
 - comercio: el nombre del negocio como aparece (por ejemplo "Coto", "Carrefour Market", "Verdulería Don José"); vacío si no se lee.
 - fecha: la del ticket, como AAAA-MM-DD. Si no trae el año, usá el de la fecha de hoy que te dice la persona; vacía si no se lee.
-- categoria: la que mejor describe el gasto entero. super: súper y almacén. fresco: verdulería, carnicería, pollería. delivery: delivery, rotisería, pizzería, comida hecha para llevar. kiosco: kiosco, café, snacks. salidas: cine, bares, restaurantes, entretenimiento. transporte: taxi, Uber, Didi, nafta, colectivo. suscripciones: streaming, apps y servicios digitales. familia: regalos y cosas para la familia. personal: ropa, tecnología, libros, hobbies. casa: limpieza, ferretería, arreglos. salud: farmacia y médicos. otros: lo que no entra en ninguna.
+- medio: cómo se pagó, si se ve. debito: débito, efectivo, transferencia, dinero en cuenta o tarjeta prepaga. tarjeta: tarjeta de crédito en un pago. cuotas: tarjeta de crédito en cuotas. Vacío si no se ve.
+- categoria: la que mejor describe el gasto entero. super: súper y almacén. fresco: verdulería, carnicería, pollería. delivery: delivery, rotisería, pizzería, comida hecha para llevar. kiosco: kiosco, café, snacks. salidas: cine, bares, restaurantes, entretenimiento. transporte: taxi, Uber, Didi, nafta, colectivo. suscripciones: streaming, apps y servicios digitales. familia: regalos y cosas para la familia. personal: ropa, tecnología, libros, hobbies. casa: limpieza, ferretería, arreglos. salud: farmacia y médicos. mascotas: alimento, veterinaria y cosas de las mascotas. otros: lo que no entra en ninguna.
 - Los importes argentinos llevan punto en los miles y coma en los decimales: $ 12.345,67 son doce mil trescientos cuarenta y cinco pesos con 67 centavos.
 - Si hay varias fotos, son partes del mismo ticket: no repitas los renglones que aparecen en dos.
 - Si la persona escribe una aclaración, manda sobre lo que se ve.
@@ -3769,6 +4023,7 @@ const ESQUEMA_TICKET = {
     comercio: { type: "string" },
     fecha: { type: "string" },
     categoria: { type: "string", enum: Object.keys(CATEGORIAS_GASTO) },
+    medio: { type: "string", enum: [...Object.keys(MEDIOS_PAGO), ""] },
     items: { type: "array", items: { type: "object", properties: {
       nombre: { type: "string" }, cantidad: { type: "number" }, precio: { type: "number" } },
       required: ["nombre", "cantidad", "precio"], additionalProperties: false } },
@@ -3776,16 +4031,15 @@ const ESQUEMA_TICKET = {
     nota: { type: "string" },
     confianza: { type: "string", enum: ["alta", "media", "baja"] }
   },
-  required: ["comercio", "fecha", "categoria", "items", "total", "nota", "confianza"], additionalProperties: false
+  required: ["comercio", "fecha", "categoria", "medio", "items", "total", "nota", "confianza"], additionalProperties: false
 };
-async function analizarTicket(fotos, texto, rubro = "alimentos"){
+async function analizarTicket(fotos, texto){
   const n = fotos.length;
   return normalizarTicket(await preguntarAClaude(PROMPT_TICKET, ESQUEMA_TICKET, [...imagenes(fotos),
-    { type: "text", text: `Hoy es ${TODAY}. ` + (n > 1 ? `Son ${n} fotos del mismo ticket. ` : "") + (rubro === "gastos" ? "Lo cargo como un gasto que no es comida. " : "")
-        + (texto ? `Aclaración: ${texto}` : "Leé este ticket de compra.") }]));
+    { type: "text", text: `Hoy es ${TODAY}. ` + (n > 1 ? `Son ${n} fotos del mismo ticket. ` : "") + (texto ? `Aclaración: ${texto}` : "Leé este ticket de compra.") }]));
 }
 /* Lo que leyó Claude, para corregir antes de guardar: el total es lo que suma en su categoría */
-function mostrarTicket(r, rubro = "alimentos"){
+function mostrarTicket(r){
   const fecha = r.fecha && r.fecha <= TODAY ? r.fecha : TODAY, hay = r.items.length > 0 || r.total > 0;
   sheet(`<h3>Lo que leyó Claude</h3>
     <p class="sub">Confianza ${esc(r.confianza)}. Corregí lo que haga falta: el total es lo que suma en su categoría.</p>
@@ -3793,8 +4047,7 @@ function mostrarTicket(r, rubro = "alimentos"){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="tTotal">Total</label><input type="number" id="tTotal" inputmode="numeric" min="0" value="${r.total}"></div>
       <div><label class="campo" for="tFecha">Cuándo</label><input type="date" id="tFecha" max="${TODAY}" value="${fecha}"></div></div>
-    <label class="campo" for="tCat">Categoría</label>${selectCategoria("tCat", r.categoria || CATEGORIA_POR_DEFECTO[rubro])}
-    ${CHECK_CASA("tCasa")}
+    ${camposGasto("t", { categoria: r.categoria || "otros", medio: r.medio })}
     ${renglonesTicket(r.items)}` : ""}
     ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c">Descartar</button>${hay ? `<button class="btn" data-x="o">Guardar</button>` : ""}</div>`);
@@ -3804,8 +4057,7 @@ function mostrarTicket(r, rubro = "alimentos"){
     const total = Math.round(Number($("#tTotal").value)), dia = $("#tFecha").value;
     if(!(total > 0 && total <= 1e9)){ toast("Poné el total del ticket"); return; }
     if(!esFechaValida(dia) || dia > TODAY){ toast("Elegí un día de hasta hoy"); return; }
-    const g = { comercio: ($("#tComercio").value.trim() || "Ticket").slice(0, 60), total, categoria: $("#tCat").value, origen: "ticket" };
-    if($("#tCasa").checked) g.deCasa = true;
+    const g = ponerCampos({ comercio: ($("#tComercio").value.trim() || "Ticket").slice(0, 60), total, origen: "ticket" }, leerCamposGasto("t", $));
     if(r.items.length) g.items = r.items;
     if(r.nota) g.nota = r.nota;
     closeSheet(); guardarGasto(g, dia);
@@ -3814,9 +4066,8 @@ function mostrarTicket(r, rubro = "alimentos"){
 /* Qué se fotografía: la hoja de las fotos, cuánto se achican, a quién se le pregunta y qué se muestra */
 const FOTO_COMIDA = { titulo: "¿Qué comés?", de: "de tu comida", lado: 1024, sumar: "de la misma comida: otro plato, otro ángulo, la etiqueta",
                       ejemplo: "Ej.: son 2 empanadas, la gaseosa es light", analizar: analizarComida, mostrar: r => mostrarAnalisis(r) };
-const fotoTicket = rubro => ({ titulo: rubro === "alimentos" ? "Ticket de compra" : "Ticket o comprobante", de: "del ticket", lado: 2048,
-  sumar: "del mismo ticket: si es largo, sacalo en partes", ejemplo: rubro === "alimentos" ? "Ej.: el detergente no es comida" : "Ej.: es la salida al cine",
-  analizar: (fotos, texto) => analizarTicket(fotos, texto, rubro), mostrar: r => mostrarTicket(r, rubro) });
+const FOTO_TICKET = { titulo: "Ticket o comprobante", de: "del ticket", lado: 2048, sumar: "del mismo ticket: si es largo, sacalo en partes",
+                      ejemplo: "Ej.: lo pagué con la Visa en 3 cuotas", analizar: analizarTicket, mostrar: mostrarTicket };
 
 /* Expuesto para pruebas automatizadas */
 window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, getMark, streak, prevIsYellow, autoCloseDays, countRange, iso, ST, save, seed, isStandalone,
@@ -3828,7 +4079,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos,
   /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS,
-  /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO };
+  /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes };
 </script>
 </body>
 </html>
