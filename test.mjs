@@ -1503,7 +1503,7 @@ console.log('\n== 37. Finanzas y Gastos en la web: el mes, pagar, gastos y ticke
   const q = pedidos.at(-1), img = q?.body.messages[0].content.find(b => b.type === 'image'), txt = q?.body.messages[0].content.find(b => b.type === 'text');
   ok('manda la foto a Claude Opus 5.5 con el prompt de tickets y su JSON schema', q && q.body.model === 'claude-opus-5-5' && img?.source.media_type === 'image/jpeg'
     && /tickets, facturas y comprobantes de pago/.test(q.body.system) && /precio negativo/.test(q.body.system) && /Hoy es 2026-11-04\. Leé este ticket/.test(txt?.text)
-    && q.body.output_config?.format?.schema.required.join() === 'comercio,fecha,categoria,medio,items,total,nota,confianza' && q.body.fallbacks === 'default');
+    && q.body.output_config?.format?.schema.required.join() === 'comercio,fecha,categoria,medio,cuotas,items,total,nota,confianza' && q.body.fallbacks === 'default');
   ok('y le pide con qué se pagó: débito, tarjeta en un pago o en cuotas', /medio: cómo se pagó/.test(q.body.system) && /cuotas: tarjeta de crédito en cuotas/.test(q.body.system)
     && /mascotas: alimento, veterinaria/.test(q.body.system));
   const hoja = await p.locator('.sheet').innerText();
@@ -1532,8 +1532,9 @@ console.log('\n== 37. Finanzas y Gastos en la web: el mes, pagar, gastos y ticke
   ok('uno bueno dice qué trae y qué no toca', /Trae 1 ingreso, 0 gastos de la casa, 0 deudas.*desde diciembre 2026.*tus gastos y presupuestos quedan como están/s.test(await p.locator('.sheet').innerText()));
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   const F2 = (await S()).finanzas;
-  ok('reemplaza lo que trae y deja los gastos', F2.ingresos[0].nombre === 'Sueldo nuevo' && F2.deudas.length === 0 && F2.gastos['2026-11-03'].length === 1
-    && F2.colchon.length === 1 && /\$ 2\.500\.000\s+te sobran en diciembre/.test(await hero()));
+  ok('reemplaza lo que trae y deja los gastos; el Coto con tarjeta de noviembre se paga en diciembre', F2.ingresos[0].nombre === 'Sueldo nuevo' && F2.deudas.length === 0 && F2.gastos['2026-11-03'].length === 1
+    && F2.colchon.length === 1 && /\$ 2\.495\.000\s+te sobran en diciembre/.test(await hero())
+    && /Tarjeta, de lo cargado en Gastos\s+− \$ 5\.000/.test(await p.locator('.fin-mes').innerText()));
   const resp = await p.evaluate(() => {
     const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
     for (const extra of [{}, { finanzas: 'x' }, { finanzas: { ingresos: [{ id: 'a', nombre: '', monto: 1 }] } }, { finanzas: { pagos: { '2026-13': [] } } },
@@ -1805,7 +1806,7 @@ console.log('\n== 41. Administración de gastos: presupuesto por categoría, med
     pedidos.push(route.request().postDataJSON());
     await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({
       id: 'msg_s', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 900, output_tokens: 150 },
-      content: [{ type: 'text', text: JSON.stringify({ comercio: 'Hoyts', fecha: '2026-11-03', categoria: 'salidas', medio: 'cuotas',
+      content: [{ type: 'text', text: JSON.stringify({ comercio: 'Hoyts', fecha: '2026-11-03', categoria: 'salidas', medio: 'cuotas', cuotas: 3,
         items: [{ nombre: 'Entradas de cine', cantidad: 2, precio: 26550 }], total: 26550, nota: '', confianza: 'alta' }) }] }) });
   });
   await p.evaluate(() => localStorage.setItem('miPrime.claveIA', 'sk-ant-api03-' + 'x'.repeat(40)));
@@ -1817,10 +1818,11 @@ console.log('\n== 41. Administración de gastos: presupuesto por categoría, med
   const txt = pedidos.at(-1)?.messages[0].content.find(b => b.type === 'text')?.text || '', props = pedidos.at(-1)?.output_config.format.schema.properties || {};
   ok('le dice a Claude la fecha de hoy y pide la categoría y con qué se pagó', /Hoy es 2026-11-04\./.test(txt) && /salidas/.test(JSON.stringify(props.categoria))
     && /cuotas/.test(JSON.stringify(props.medio)) && /categoria: la que mejor describe/.test(pedidos.at(-1).system));
-  ok('la categoría y el medio que propone Claude vienen elegidos', (await p.locator('#tCat').inputValue()) === 'salidas' && (await p.locator('#tMedio').inputValue()) === 'cuotas');
+  ok('la categoría, el medio y las cuotas que propone Claude vienen elegidos', (await p.locator('#tCat').inputValue()) === 'salidas' && (await p.locator('#tMedio').inputValue()) === 'cuotas'
+    && (await p.locator('#tCuotas').inputValue()) === '3' && await p.locator('.sheet .en-cuotas').isVisible());
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   const hoyts = (await S()).finanzas.gastos['2026-11-03'][0];
-  ok('y se guarda con su categoría y en cuotas', hoyts.categoria === 'salidas' && hoyts.medio === 'cuotas' && /Hoyts\s+Salidas y entretenimiento · en cuotas/.test(await dia()));
+  ok('y se guarda con su categoría y en cuotas', hoyts.categoria === 'salidas' && hoyts.medio === 'cuotas' && hoyts.cuotas === 3 && /Hoyts\s+Salidas y entretenimiento · en 3 cuotas/.test(await dia()));
   ok('comprar en cuotas deja "Sin deuda nueva" en amarillo ese día', (await S()).marks['2026-11-03']?.hs === 'yellow' && (await S()).marks['2026-11-04']?.hs === 'green');
   // El mes
   ok('el mes: necesario 35 %, gustos 65 %, y a este ritmo dónde termina', /Necesario \$ 14\.000 \(35 %\) · Gustos \$ 26\.550 \(65 %\)/.test(await gmes())
@@ -1842,7 +1844,8 @@ console.log('\n== 41. Administración de gastos: presupuesto por categoría, med
   ok('pasado de presupuesto: cuánto y en qué porcentaje', /Salidas y entretenimiento\s+gusto\s+\$ 26\.550\s+de \$ 20\.000\s+te pasaste \$ 6\.550 \(\+33 %\)/.test(await sob())
     && await p.locator('.sobres .cat-s.warn').count() === 1 && /Otros gastos · \$ 40\.550 de \$ 20\.000/i.test(await sob()));
   fm = await cuentas();
-  ok('y Finanzas cuenta lo gastado de más', /Otros gastos \(te pasaste\)\s+− \$ 40\.550/.test(fm) && (await S()).finanzas.presupuestos.salidas === 20000);
+  ok('Finanzas marca que te pasaste, y resta en noviembre solo lo que no fue con tarjeta', /Otros gastos \(te pasaste\)\s+− \$ 14\.000/.test(fm)
+    && !/Tarjeta/.test(fm) && (await S()).finanzas.presupuestos.salidas === 20000);
   // Editar la categoría de un gasto
   await p.locator('.diario .fila', { hasText: 'Didi al cine' }).locator('.ce').click();
   await p.locator('#eCat').selectOption('salidas'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
@@ -1886,7 +1889,139 @@ console.log('\n== 41. Administración de gastos: presupuesto por categoría, med
   await c.close();
 }
 
-console.log('\n== 42. Capturas ==');
+console.log('\n== 43. Gastos y Finanzas conectados: tarjeta, conciliación, indicadores y hoy podés gastar ==');
+{
+  const L = cargarLogica(estado());
+  const G = { '2026-11-02': [{ id: 'a', comercio: 'Coto', total: 50000, categoria: 'super', medio: 'debito' },
+                             { id: 'b', comercio: 'Cine', total: 30000, categoria: 'salidas', medio: 'tarjeta' }],
+              '2026-11-03': [{ id: 'c', comercio: 'Tele', total: 100000, categoria: 'casa', medio: 'cuotas', cuotas: 3 },
+                             { id: 'd', comercio: 'HBO', total: 12000, categoria: 'suscripciones', medio: 'tarjeta', deCasa: true }],
+              '2026-11-27': [{ id: 'e', comercio: 'Libro', total: 20000, categoria: 'personal', medio: 'tarjeta' }] };
+  const F = { ...finanzas(), gastos: G };
+  const t = m => L.tarjetaDelMes(F, m);
+  ok('la tarjeta se paga con el resumen: en un pago, el mes siguiente; en cuotas, una por mes; lo de la casa no',
+    t('2026-11').total === 0 && t('2026-12').unPago === 50000 && t('2026-12').cuotas === 33333 && t('2027-01').cuotas === 33333
+    && t('2027-02').cuotas === 33334 && t('2027-03').total === 0 && t('2026-12').items.map(x => x.cuota).join() === '0,1,0');
+  const Fc = { ...F, cierreTarjeta: 25 };
+  ok('con el día de cierre, lo comprado después va un mes más adelante',
+    L.tarjetaDelMes(Fc, '2026-12').unPago === 30000 && L.tarjetaDelMes(Fc, '2027-01').unPago === 20000);
+  const r = L.resumenMes(F, '2026-11', '2026-11-04'), d = L.resumenMes(F, '2026-12', '2026-11-04');
+  ok('noviembre no resta lo de tarjeta; diciembre suma lo de la tarjeta: faltan 50 mil y en diciembre sobran 1,4 M',
+    r.alimentos === 400000 && r.gastos === 0 && r.sobra === -50000 && d.tarjeta.total === 83333 && d.sobra === 1550000 - 83333);
+  ok('marcado como ya en el resumen, no se cuenta dos veces',
+    L.resumenMes({ ...F, enResumen: { '2026-12': true } }, '2026-12', '2026-11-04').sobra === 1550000);
+  ok('en cuántas cuotas: Claude lo lee si se ve; si no, 0',
+    L.normalizarTicket({ medio: 'cuotas', cuotas: 6 }).cuotas === 6 && L.normalizarTicket({ medio: 'cuotas' }).cuotas === 0
+    && L.normalizarTicket({ medio: 'tarjeta', cuotas: 6 }).cuotas === 0 && L.normalizarTicket({ medio: 'cuotas', cuotas: 99 }).cuotas === 0);
+  const Fk = { ...F, pagos: { '2026-11': ['f:f1'] }, conciliacion: { '2026-11': { inicio: 500000, fin: 900000 } } }, k = L.conciliacionMes(Fk, '2026-11');
+  ok('conciliación: salió 1,3 M (500 mil + 1,7 M del plan − 900 mil); anotado 750 mil (alquiler pagado y gastos sin tarjeta); sin anotar 550 mil, 42 %',
+    k.plan === 1700000 && k.entro === 1700000 && k.salio === 1300000 && k.pagado === 700000 && k.gastado === 50000 && k.sinAnotar === 550000 && k.pct === 42);
+  ok('sin las dos fotos, todavía no hay conciliación; lo que entró se puede cambiar',
+    L.conciliacionMes(F, '2026-11').listo === false && L.conciliacionMes(F, '2026-11').pct === null
+    && L.conciliacionMes({ ...Fk, conciliacion: { '2026-11': { inicio: 500000, fin: 900000, entro: 2000000 } } }, '2026-11').salio === 1600000);
+  const ind = Object.fromEntries(L.indicadoresMes(Fk, '2026-11', '2026-11-04').map(i => [i.k, [i.valor, i.enMeta]]));
+  ok('indicadores: cuotas 28 % y casa 40 % en meta; ahorro −2 % fuera; sin lo de una vez +250 mil; deuda nueva 100 mil (la tele en cuotas); sin anotar 42 %',
+    JSON.stringify(ind) === JSON.stringify({ cuotas: [28, true], casa: [40, true], ahorro: [-2, false], sinUnaVez: [250000, true], deudaNueva: [100000, false], sinAnotar: [42, false] }));
+  ok('deuda nueva: préstamos con fecha de alta, adelantos marcados como deuda y compras en cuotas del mes',
+    L.deudaNuevaDelMes({ deudas: [{ saldo: 400000, alta: '2026-11-10' }, { saldo: 9, alta: '2026-10-01' }], movimientos: [{ mes: '2026-11', monto: 300000, deuda: true }, { mes: '2026-11', monto: 5 }],
+      gastos: G }, '2026-11') === 800000);
+  const dh = L.disponibleHoy({ ...finanzas(), gastos: { '2026-11-02': [{ comercio: 'x', total: 50000 }], '2026-11-04': [{ comercio: 'y', total: 10000 }, { comercio: 'z', total: 5000, deCasa: true }] } }, '2026-11-04');
+  ok('hoy podés gastar: lo que queda (350 mil) en 27 días, de a 100: 12.900; llevás 10 mil y te quedan 2.900',
+    dh.queda === 350000 && dh.dias === 27 && dh.porDia === 12900 && dh.deHoy === 10000 && dh.resto === 2900);
+  ok('antes del plan o sin presupuesto, no hay', L.disponibleHoy(finanzas(), '2026-10-20') === null
+    && L.disponibleHoy({ ...finanzas(), presupuestos: {} }, '2026-11-04') === null);
+
+  const st43 = { ...estado({ lastClosed: '2026-11-03' }), finanzas: { ...finanzas(), gastos: {
+    '2026-11-02': [{ id: 'g1', comercio: 'Coto', total: 50000, categoria: 'super', medio: 'debito' }],
+    '2026-11-04': [{ id: 'g2', comercio: 'Kiosco', total: 10000, categoria: 'kiosco', medio: 'debito' }] } } };
+  const { p, c, errs } = await abrirEn('2026-11-04', st43);
+  const S = () => p.evaluate(() => window.__prime.S);
+  ok('Hoy dice cuánto podés gastar hoy y cuánto llevás', /Hoy podés gastar \$ 12\.900: llevás \$ 10\.000, te quedan \$ 2\.900\./.test(await p.locator('.hoy-gasto').innerText())
+    && /queda del presupuesto del mes \(\$ 350\.000\) repartido en los 27 días que faltan/.test(await p.locator('.hoy-gasto').innerText()));
+  await p.locator('.hoy-gasto').click(); await p.waitForTimeout(150);
+  ok('y lleva a Gastos, que también lo dice arriba', await p.locator('nav button[data-tab="gastos"]').getAttribute('aria-current') === 'true'
+    && /Hoy podés gastar \$ 12\.900/.test(await p.locator('.gastos-mes').innerText()));
+  // Una compra en cuotas
+  await p.locator('.cargar [data-act="fmano"]').click();
+  ok('las cuotas aparecen solo con "en cuotas"', !(await p.locator('.sheet .en-cuotas').isVisible()));
+  await p.locator('#gNombre').fill('Auriculares'); await p.locator('#gTotal').fill('60000'); await p.locator('#gCat').selectOption('personal');
+  await p.locator('#gMedio').selectOption('cuotas');
+  ok('elegido "en cuotas", pregunta en cuántas', await p.locator('.sheet .en-cuotas').isVisible());
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('sin la cantidad de cuotas no guarda', await p.locator('.sheet #gCuotas').count() === 1 && (await S()).finanzas.gastos['2026-11-04'].length === 1);
+  await p.locator('#gCuotas').fill('3'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const aur = (await S()).finanzas.gastos['2026-11-04'][1];
+  ok('se guarda en 3 cuotas y se ve así', aur?.medio === 'cuotas' && aur.cuotas === 3 && /Auriculares\s+Gustos personales · en 3 cuotas/.test(await p.locator('.diario').innerText())
+    && /llevás \$ 70\.000, te pasaste \$ 57\.100/.test(await p.locator('.gastos-mes').innerText()));
+  await p.locator('.diario .fila', { hasText: 'Auriculares' }).locator('.ce').click();
+  ok('al editarla se ven las cuotas', await p.locator('#eCuotas').inputValue() === '3' && await p.locator('.sheet .en-cuotas').isVisible());
+  await p.locator('#eMedio').selectOption('tarjeta'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('pasada a un pago, pierde las cuotas', !('cuotas' in (await S()).finanzas.gastos['2026-11-04'][1]));
+  await p.locator('.diario .fila', { hasText: 'Auriculares' }).locator('.ce').click();
+  await p.locator('#eMedio').selectOption('cuotas'); await p.locator('#eCuotas').fill('3'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  // Finanzas: la tarjeta en el mes que se paga
+  await ir(p, 'finanzas');
+  ok('noviembre no tiene fila de tarjeta: lo de este mes se paga después', await p.locator('.fin-mes [data-act="ftarjeta"]').count() === 0);
+  await p.locator('[data-act="fmes"][data-n="1"]').click(); await p.waitForTimeout(100);
+  ok('en diciembre, la primera cuota: $ 20.000', /Tarjeta, de lo cargado en Gastos\s+− \$ 20\.000/.test(await p.locator('.fin-mes').innerText())
+    && /\$ 20\.000 de tarjeta/.test(await p.locator('.fin-mes .pie').innerText()));
+  await p.locator('.fin-mes [data-act="ftarjeta"]').click();
+  ok('tocándola, el detalle: cuota 1 de 3', /Auriculares\s+4\/11 · cuota 1 de 3\s+\$ 20\.000/.test(await p.locator('.sheet').innerText()));
+  await p.locator('#tjCierre').fill('3'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('con cierre el 3, lo del 4 empieza en enero', (await S()).finanzas.cierreTarjeta === 3 && await p.locator('.fin-mes [data-act="ftarjeta"]').count() === 0);
+  await p.locator('[data-act="fmes"][data-n="1"]').click(); await p.waitForTimeout(100);
+  await p.locator('.fin-mes [data-act="ftarjeta"]').click(); await p.locator('#tjCierre').fill(''); await p.locator('#tjResumen').check();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('ya en el resumen: queda en $ 0 y no se cuenta dos veces', (await S()).finanzas.enResumen['2027-01'] === true && !('cierreTarjeta' in (await S()).finanzas)
+    && /Tarjeta \(ya en el resumen\)\s+\$ 0/.test(await p.locator('.fin-mes').innerText()));
+  await p.locator('[data-act="fmes"][data-n="-1"]').click(); await p.locator('[data-act="fmes"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  // Indicadores
+  const indT = await p.locator('.indicadores').innerText();
+  ok('indicadores de noviembre: 3 de 6 en meta, con su valor, su meta y en palabras', /Indicadores de noviembre · 3 de 6 en meta/i.test(indT)
+    && /Cuotas de deudas\s+del ingreso · meta: hasta 30 %\s+28 %\s+✓ en meta/.test(indT) && /Ahorro[\s\S]*?−2 %\s+✕ fuera de meta/.test(indT)
+    && /El mes sin lo de una vez[\s\S]*?\+ \$ 250\.000\s+✓ en meta/.test(indT) && /Deuda nueva[\s\S]*?\$ 60\.000\s+✕ fuera de meta/.test(indT)
+    && /Sin anotar[\s\S]*?—\s+falta conciliar/.test(indT));
+  // Conciliación
+  await ir(p, 'gastos');
+  ok('el cierre invita a cargar los saldos', /Anotá cuánta plata tenés/.test(await p.locator('.cierre').innerText()));
+  await p.locator('[data-act="gconc"]').click();
+  ok('la hoja trae lo que entró según el plan, con el detalle', await p.locator('#cEntro').inputValue() === '1700000'
+    && /Sueldo \+ \$ 2\.000\.000 · Descuento del adelanto − \$ 300\.000 = \$ 1\.700\.000/.test(await p.locator('.sheet').innerText()));
+  await p.locator('#cInicio').fill('500000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('con el saldo al empezar, guarda y espera el final', JSON.stringify((await S()).finanzas.conciliacion) === '{"2026-11":{"inicio":500000}}'
+    && /Al empezar: \$ 500\.000/.test(await p.locator('.cierre').innerText()) && /Cargar el saldo final/.test(await p.locator('.cierre').innerText()));
+  await p.locator('[data-act="gconc"]').click(); await p.locator('#cFin').fill('900000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  let ci = await p.locator('.cierre').innerText();
+  ok('salió $ 1.300.000; anotado $ 60.000; sin anotar $ 1.240.000, el 95 %', /Salió\s+empezaste con \$ 500\.000, entró \$ 1\.700\.000, terminaste con \$ 900\.000\s+\$ 1\.300\.000/.test(ci)
+    && /Anotado\s+pagos marcados \$ 0 \+ gastos sin tarjeta \$ 60\.000\s+\$ 60\.000/.test(ci) && /Sin anotar: \$ 1\.240\.000, el 95 % de lo que salió\. Meta: menos de 10 %\.\s+✕ Fuera de meta/.test(ci));
+  await ir(p, 'finanzas');
+  await p.locator('[data-act="fpagar"][data-k="f:f1"]').click(); await p.waitForTimeout(100);
+  ok('marcar el alquiler pagado lo explica: sin anotar 42 % en los indicadores', /Sin anotar[\s\S]*?42 %\s+✕ fuera de meta/.test(await p.locator('.indicadores').innerText()));
+  // Actualizar presupuestos y marcar deuda nueva desde un archivo
+  const archivo = data => ({ name: 'act.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+  const [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo({ actualizar: { presupuestos: { salidas: 80000, otros: 40000, kiosco: 0 },
+    movimientos: [{ id: 'm1', mes: '2026-11', nombre: 'Descuento del adelanto', monto: -300000, deuda: true }] } })); await p.waitForTimeout(200);
+  ok('actualizar presupuestos dice cuáles cambia', /Cambia el presupuesto de Salidas y entretenimiento, Otros, Kiosco, café y snacks\./.test(await p.locator('.sheet').innerText())
+    && /Cambia «Descuento del adelanto»\. Lo demás queda como está\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const pr = (await S()).finanzas.presupuestos;
+  ok('y mezcla: cambia esas, saca la que va en 0 y deja las demás', pr.salidas === 80000 && pr.otros === 40000 && !('kiosco' in pr) && pr.super === 200000 && pr.fresco === 100000
+    && /Deuda nueva[\s\S]*?\$ 360\.000/.test(await p.locator('.indicadores').innerText()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [], con = f => ({ ...base, finanzas: { ...base.finanzas, ...f } });
+    for (const f of [{ gastos: { '2026-11-01': [{ comercio: 'x', total: 1, medio: 'cuotas', cuotas: 3 }] } }, { gastos: { '2026-11-01': [{ comercio: 'x', total: 1, cuotas: 0 }] } },
+                     { enResumen: { '2026-12': true } }, { enResumen: { '2026-12': 'si' } }, { cierreTarjeta: 25 }, { cierreTarjeta: 40 },
+                     { conciliacion: { '2026-11': { inicio: 1, fin: 2 } } }, { conciliacion: { '2026-11': { inicio: -1 } } }, { conciliacion: { '2026-11': { otra: 1 } } }])
+      try { P.prepararRespaldo(JSON.stringify(con(f))); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae cuotas, tarjeta y conciliación, y rechaza los rotos (' + resp + ')', resp === 'ok,no,ok,no,ok,no,ok,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 44. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

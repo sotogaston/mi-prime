@@ -303,6 +303,15 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 .cat-s{display:block;margin-top:4px}
 .hormiga{margin:12px 0 0;font-size:14px;line-height:1.5}
 .cat-s.warn{color:var(--fail);font-weight:700}
+.ind{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.ind:first-of-type{border-top:0}
+.ind-n{flex:1;font-size:14.5px;font-weight:600;line-height:1.3}
+.ind-n small{display:block;font-weight:400;font-size:12.5px;color:var(--muted);margin-top:2px}
+.ind-v{text-align:right;display:grid;gap:2px;justify-items:end}
+.ind-v b{font-size:16px;font-variant-numeric:tabular-nums}
+.ind-v .e{font-style:normal;font-size:12px;color:var(--muted)}
+.ind-v .e.bien{color:var(--ok);font-weight:700}
+.ind-v .e.mal{color:var(--fail);font-weight:700}
 .frow-p{display:grid;grid-template-columns:1fr 120px;gap:10px;align-items:center;padding:4px 0}
 .frow-p label{font-size:14px;line-height:1.3}
 .frow-p small{color:var(--muted)}
@@ -1309,20 +1318,25 @@ function presupuestoGastos(F){ return presupuestoRubro(F, "gastos"); }
 function gastoMensual(F){ return suma(F?.fijos, f => f.monto) + presupuestoAlimentos(F) + presupuestoGastos(F); }
 function totalColchon(F){ return suma(F?.colchon, c => c.monto); }
 
-/* Lo que entra y lo que sale en un mes. Alimentos y gastos: en un mes pasado, lo
-   gastado; en este y en los que vienen, el presupuesto, o lo gastado si ya se pasó
-   (sin presupuesto de gastos, solo lo que se cargó). */
+/* Lo que entra y lo que sale de la cuenta en un mes (la caja). Alimentos y otros
+   gastos: lo gastado que no fue con tarjeta y, en este mes y en los que vienen, lo
+   que queda del presupuesto (sin presupuesto de otros gastos, solo lo que se cargó).
+   Lo de tarjeta se paga con el resumen: va en "tarjeta" del mes en que se paga,
+   hasta que se marca que ya está en el resumen cargado en Deudas. */
 function resumenMes(F, mes, hoy){
   const ingresos = (F?.ingresos || []).map(i => ({ nombre: i.nombre, monto: ingresoDelMes(i, mes) })).filter(i => i.monto);
   const movimientos = (F?.movimientos || []).filter(m => m.mes === mes);
   const presupuesto = presupuestoAlimentos(F), gastado = gastadoEnMes(F?.gastos, mes, "alimentos");
   const presupuestoG = presupuestoGastos(F), gastadoG = gastadoEnMes(F?.gastos, mes, "gastos");
   const casa = suma(F?.fijos, f => f.monto), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes)), pasado = mes < mesDe(hoy);
-  const alimentos = pasado ? gastado : Math.max(presupuesto, gastado), gastos = pasado ? gastadoG : Math.max(presupuestoG, gastadoG);
+  const caja = rubro => suma(gastosDelMes(F?.gastos, mes, rubro).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
+  const alimentos = caja("alimentos") + (pasado ? 0 : Math.max(0, presupuesto - gastado));
+  const gastos = caja("gastos") + (pasado ? 0 : Math.max(0, presupuestoG - gastadoG));
+  const tarjeta = tarjetaDelMes(F, mes), deTarjeta = tarjeta.enResumen ? 0 : tarjeta.total;
   const entra = suma(ingresos, i => i.monto) + suma(movimientos, m => Math.max(0, m.monto));
   const otros = suma(movimientos, m => Math.max(0, -m.monto));
   return { mes, entra, casa, alimentos, presupuesto, gastado, gastos, presupuestoGastos: presupuestoG, gastadoGastos: gastadoG,
-           cuotas, otros, ingresos, movimientos, sobra: entra - casa - alimentos - gastos - cuotas - otros };
+           cuotas, tarjeta, otros, ingresos, movimientos, sobra: entra - casa - alimentos - gastos - cuotas - deTarjeta - otros };
 }
 /* Mes a mes desde `desde`: cuánto sobra y cómo queda el colchón si se guarda lo que sobra
    (y si falta, sale de ahí) */
@@ -1410,6 +1424,7 @@ function normalizarTicket(r){
   return { comercio: String(r?.comercio || "").trim().slice(0, 60), fecha, items,
            categoria: Object.hasOwn(CATEGORIAS_GASTO, r?.categoria) ? r.categoria : "",
            medio: Object.hasOwn(MEDIOS_PAGO, r?.medio) ? r.medio : "",
+           cuotas: r?.medio === "cuotas" && Number.isInteger(r?.cuotas) && r.cuotas >= 2 && r.cuotas <= 60 ? r.cuotas : 0,
            total: plata(r?.total, 0) || Math.max(0, suma(items, i => i.precio)),
            nota: String(r?.nota || "").slice(0, 300), confianza: ["alta", "media", "baja"].includes(r?.confianza) ? r.confianza : "baja" };
 }
@@ -1476,6 +1491,83 @@ function totalesPorMes(gastos, hasta, n){
     const mes = sumarMeses(hasta, i - n + 1);
     return { mes, total: suma(gastosDelMes(gastos, mes).filter(x => !x.g.deCasa), x => x.g.total) };
   });
+}
+
+/* ---- la tarjeta: lo que se compra hoy se paga con el resumen ----
+   En un pago, con el resumen del mes siguiente; en cuotas, una por mes desde ahí.
+   Con el día de cierre (F.cierreTarjeta), lo comprado después del cierre va un mes
+   más adelante. F.enResumen[mes] = true: eso ya está en el resumen cargado en
+   Deudas y no se cuenta dos veces. */
+const enTarjeta = g => g?.medio === "tarjeta" || g?.medio === "cuotas";
+function difMeses(a, b){ const [ya, ma] = a.split("-").map(Number), [yb, mb] = b.split("-").map(Number); return (yb - ya) * 12 + mb - ma; }
+function primerPagoTarjeta(F, fecha){ const c = F?.cierreTarjeta; return sumarMeses(mesDe(fecha), c && parseISO(fecha).getDate() > c ? 2 : 1); }
+function tarjetaDelMes(F, mes){
+  const out = { unPago: 0, cuotas: 0, items: [] };
+  for(const [fecha, l] of Object.entries(F?.gastos || {})) for(const g of l){
+    if(g.deCasa || !enTarjeta(g)) continue;
+    const n = g.medio === "cuotas" ? g.cuotas || 1 : 1, k = difMeses(primerPagoTarjeta(F, fecha), mes);
+    if(k < 0 || k >= n) continue;
+    const base = Math.round(g.total / n), monto = k === n - 1 ? g.total - base * (n - 1) : base;
+    if(g.medio === "cuotas") out.cuotas += monto; else out.unPago += monto;
+    out.items.push({ fecha, comercio: g.comercio, monto, cuota: g.medio === "cuotas" ? k + 1 : 0, de: n });
+  }
+  out.items.sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0);
+  return { ...out, total: out.unPago + out.cuotas, enResumen: !!F?.enResumen?.[mes] };
+}
+
+/* ---- conciliación: lo que se fue sin anotar ----
+   Dos fotos del saldo (banco, Mercado Pago y efectivo), al empezar y al terminar el
+   mes, y lo que entró en el medio (si no se cambia, lo del plan: ingresos y lo de
+   una sola vez, neto). Lo que salió de verdad, menos lo anotado (lo marcado pagado
+   de la casa y de las cuotas, y los gastos que no fueron con tarjeta ni están en
+   la casa), es lo que se fue sin anotar. */
+function conciliacionMes(F, mes){
+  const c = F?.conciliacion?.[mes] || {};
+  const plan = suma(F?.ingresos, i => ingresoDelMes(i, mes)) + suma((F?.movimientos || []).filter(m => m.mes === mes), m => m.monto);
+  const entro = c.entro ?? plan, listo = c.inicio != null && c.fin != null;
+  const pagado = suma(vencimientos(F, mes).filter(v => v.pagado), v => v.monto);
+  const gastado = suma(gastosDelMes(F?.gastos, mes).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
+  const salio = listo ? c.inicio + entro - c.fin : null, anotado = pagado + gastado, sinAnotar = listo ? salio - anotado : null;
+  return { inicio: c.inicio ?? null, fin: c.fin ?? null, plan, entro, cambiado: c.entro != null, listo, pagado, gastado, anotado, salio, sinAnotar,
+           pct: listo && salio > 0 ? Math.round(100 * sinAnotar / salio) : null };
+}
+
+/* ---- indicadores del mes, con metas de referencia ----
+   Sobre lo que entra de ingresos (sin adelantos ni préstamos): cuánto se va en
+   cuotas de deudas y en la casa, cuánto sobra; el mes sin lo de una sola vez; la
+   deuda nueva (préstamos y adelantos marcados como deuda, compras en cuotas) y lo
+   que se fue sin anotar. */
+function deudaNuevaDelMes(F, mes){
+  return suma((F?.deudas || []).filter(d => d.alta && mesDe(d.alta) === mes), d => d.saldo)
+    + suma((F?.movimientos || []).filter(m => m.deuda && m.mes === mes), m => Math.abs(m.monto))
+    + suma(gastosDelMes(F?.gastos, mes).filter(x => x.g.medio === "cuotas" && !x.g.deCasa), x => x.g.total);
+}
+const INDICADORES = [
+  { k: "cuotas", nombre: "Cuotas de deudas", que: "del ingreso", meta: "hasta 30 %", ok: v => v <= 30 },
+  { k: "casa", nombre: "Casa", que: "del ingreso", meta: "hasta 50 %", ok: v => v <= 50 },
+  { k: "ahorro", nombre: "Ahorro", que: "lo que sobra, del ingreso", meta: "10 % o más", ok: v => v >= 10 },
+  { k: "sinUnaVez", nombre: "El mes sin lo de una vez", que: "sin adelantos, préstamos, descuentos ni saldos a favor", meta: "$ 0 o más", ok: v => v >= 0, plata: true },
+  { k: "deudaNueva", nombre: "Deuda nueva", que: "préstamos, adelantos y compras en cuotas", meta: "$ 0", ok: v => v === 0, plata: true },
+  { k: "sinAnotar", nombre: "Sin anotar", que: "de lo que salió, por la conciliación", meta: "menos de 10 %", ok: v => v < 10 }
+];
+function indicadoresMes(F, mes, hoy){
+  const r = resumenMes(F, mes, hoy), ing = suma(r.ingresos, i => i.monto), pct = n => ing ? Math.round(100 * n / ing) : null;
+  const v = { cuotas: pct(r.cuotas), casa: pct(r.casa), ahorro: pct(r.sobra), sinUnaVez: r.sobra - suma(r.movimientos, m => m.monto),
+              deudaNueva: deudaNuevaDelMes(F, mes), sinAnotar: conciliacionMes(F, mes).pct };
+  return INDICADORES.map(i => ({ ...i, valor: v[i.k], enMeta: v[i.k] == null ? null : i.ok(v[i.k]) }));
+}
+
+/* ---- hoy podés gastar ----
+   Lo que queda del presupuesto del mes (alimentos y otros gastos, sin lo de hoy ni
+   lo que ya está en la casa) repartido en los días que faltan, hoy incluido, y
+   cuánto se lleva gastado hoy. Antes del primer mes del plan o sin presupuesto, nada. */
+function disponibleHoy(F, hoy){
+  const mes = mesDe(hoy), pres = presupuestoAlimentos(F) + presupuestoGastos(F);
+  if(!pres || (F?.inicio && mes < F.inicio)) return null;
+  const l = gastosDelMes(F?.gastos, mes).filter(x => !x.g.deCasa), antes = suma(l.filter(x => x.fecha < hoy), x => x.g.total);
+  const [y, m] = mes.split("-").map(Number), dias = daysInMonth(y, m - 1) - parseISO(hoy).getDate() + 1;
+  const queda = pres - antes, porDia = queda > 0 ? Math.floor(queda / dias / 100) * 100 : 0, deHoy = suma(l.filter(x => x.fecha === hoy), x => x.g.total);
+  return { presupuesto: pres, queda, dias, porDia, deHoy, resto: porDia - deHoy };
 }
 
 /* ---- hábitos de finanzas ----
@@ -1820,6 +1912,7 @@ function vHoy(){
   ${alertaVencimientosHTML()}
   ${pendHTML}
   ${avisosHTML()}
+  ${disponibleHoyHTML()}
   ${reflexionHTML()}
   ${finanzasHoyHTML()}
   <div class="stats">
@@ -2414,7 +2507,7 @@ const HORA_AVISO_VENC = "10:00";       // el aviso del día antes de cada vencim
 function fin(){
   const f = S.finanzas ||= {};
   for(const k of ["ingresos", "fijos", "deudas", "movimientos", "colchon"]) f[k] ||= [];
-  f.gastos ||= {}; f.pagos ||= {}; f.cierres ||= {};
+  f.gastos ||= {}; f.pagos ||= {}; f.cierres ||= {}; f.enResumen ||= {}; f.conciliacion ||= {};
   f.presupuestos ||= presupuestosIniciales(f);
   return f;
 }
@@ -2430,7 +2523,7 @@ function mesDelPlan(F){ const m = mesDe(TODAY); return F.inicio > m ? F.inicio :
 
 function vFinanzas(){
   const F = fin(), conPlan = F.ingresos.length + F.fijos.length + F.deudas.length > 0;
-  return alertaVencimientosHTML() + (conPlan ? rumboHTML(F) + mesFinHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML())
+  return alertaVencimientosHTML() + (conPlan ? rumboHTML(F) + mesFinHTML(F) + indicadoresHTML(F) + vencimientosHTML(F) : bienvenidaFinHTML())
     + (conPlan ? colchonHTML(F) + deudasHTML(F) + proximosHTML(F) : "") + habitosFinHTML() + datosFinHTML(conPlan);
 }
 function bienvenidaFinHTML(){
@@ -2446,7 +2539,8 @@ function mesFinHTML(F){
   const mes = FIN_MES || mesDelPlan(F), r = resumenMes(F, mes, TODAY), nombre = MESES[Number(mes.slice(5)) - 1];
   const falta = suma(vencimientos(F, mes).filter(v => !v.pagado), v => v.monto);
   const queda = (p, g) => mes === mesDe(TODAY) ? Math.max(0, p - g) : mes > mesDe(TODAY) ? p : 0;
-  const resto = [[queda(r.presupuesto, r.gastado), "de alimentos"], [queda(r.presupuestoGastos, r.gastadoGastos), "de otros gastos"]]
+  const t = r.tarjeta, deTarjeta = t.enResumen || mes < mesDe(TODAY) ? 0 : t.total;
+  const resto = [[queda(r.presupuesto, r.gastado), "de alimentos"], [queda(r.presupuestoGastos, r.gastadoGastos), "de otros gastos"], [deTarjeta, "de tarjeta"]]
     .filter(([n]) => n).map(([n, t]) => `${aPesos(n)} ${t}`);
   const fila = (t, n, act, attr) => `<button data-act="${act}" ${attr}><span>${t}</span><b>${conSigno(n)}</b><i>›</i></button>`;
   return `<div class="mnav"><button data-act="fmes" data-n="-1" aria-label="Mes anterior"${F.inicio && mes <= F.inicio ? " disabled" : ""}>‹</button>
@@ -2457,12 +2551,51 @@ function mesFinHTML(F){
       ${fila("Casa", -r.casa, "flista", 'data-k="fijos"')}
       ${fila(r.gastado > r.presupuesto ? "Alimentos (te pasaste)" : "Alimentos", -r.alimentos, "irGastos", "")}
       ${fila(r.presupuestoGastos && r.gastadoGastos > r.presupuestoGastos ? "Otros gastos (te pasaste)" : "Otros gastos", -r.gastos, "irGastos", "")}
-      ${fila("Cuotas", -r.cuotas, "flista", 'data-k="deudas"')}</div>
+      ${fila("Cuotas", -r.cuotas, "flista", 'data-k="deudas"')}
+      ${t.total ? fila(t.enResumen ? "Tarjeta (ya en el resumen)" : "Tarjeta, de lo cargado en Gastos", t.enResumen ? 0 : -t.total, "ftarjeta", `data-m="${mes}"`) : ""}</div>
     ${r.movimientos.length ? `<p class="frec-t">Solo en ${nombre}</p>${r.movimientos.map(m => `<div class="fila"><span class="n">${esc(m.nombre)}</span>
       <b>${conSigno(m.monto)}</b><button class="x" data-act="fborrarMov" data-id="${m.id}" aria-label="Sacar ${esc(m.nombre)}">✕</button></div>`).join("")}` : ""}
     <button class="linkbtn" data-act="fmov" data-m="${mes}">+ Algo de este mes: un adelanto, un descuento, un gasto extra</button>
     <p class="pie">Falta pagar <b>${aPesos(falta)}</b> de cuotas y de la casa${resto.length ? `, y ${resto.join(" y ")}` : ""}.${r.sobra < 0
       ? " Para cubrir lo que falta: recortá, usá el colchón o, si no queda otra, un adelanto (cargalo como algo de este mes)." : ""}</p></div>`;
+}
+/* Lo de tarjeta que sale de Gastos y se paga en `mes`: el detalle, el día de cierre
+   y si ya está en el resumen cargado en Deudas */
+function verTarjeta(mes){
+  const F = fin(), t = tarjetaDelMes(F, mes), nombre = MESES[Number(mes.slice(5)) - 1];
+  sheet(`<h3>Tarjeta en ${nombre}</h3>
+    <p class="sub">Lo que en Gastos pagaste con tarjeta se paga con el resumen: en un pago, con el del mes siguiente a la compra; en cuotas, una por mes desde ahí.
+      Es un estimado hasta que cargues el resumen en Deudas.</p>
+    ${t.items.map(x => `<div class="renglon"><span>${esc(x.comercio)} <small style="color:var(--muted)">${diaYMes(x.fecha)}${x.cuota ? ` · cuota ${x.cuota} de ${x.de}` : ""}</small></span>
+      <b>${aPesos(x.monto)}</b></div>`).join("")}
+    <div class="renglon"><span><b>Total</b></span><b>${aPesos(t.total)}</b></div>
+    <label class="campo" for="tjCierre">Día de cierre de la tarjeta</label>
+    <input type="number" id="tjCierre" inputmode="numeric" min="1" max="31" value="${F.cierreTarjeta || ""}" placeholder="Sin cargar">
+    <p class="pie" style="margin-top:6px">Lo comprado después del cierre va un mes más adelante. Vacío: todo al mes siguiente.</p>
+    <label class="chk"><input type="checkbox" id="tjResumen"${t.enResumen ? " checked" : ""}> Ya está en el resumen de ${nombre} que cargué en Deudas: no sumarlo de nuevo</label>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const c = $("#tjCierre").value.trim(), n = Number(c), enResumen = $("#tjResumen").checked;
+    if(c && !(Number.isInteger(n) && n >= 1 && n <= 31)){ toast("El cierre es un día del 1 al 31"); return; }
+    if(c) F.cierreTarjeta = n; else delete F.cierreTarjeta;
+    if(enResumen) F.enResumen[mes] = true; else delete F.enResumen[mes];
+    save(); closeSheet(); render(); toast(enResumen ? "Listo: no se cuenta dos veces" : "Tarjeta actualizada");
+  };
+}
+
+/* Indicadores del mes, con su meta y si está en meta, en palabras */
+function indicadoresHTML(F){
+  const mes = FIN_MES || mesDelPlan(F), l = indicadoresMes(F, mes, TODAY), en = l.filter(i => i.enMeta).length;
+  const valor = i => i.valor == null ? "—" : i.plata ? (i.k === "deudaNueva" ? aPesos(i.valor) : conSigno(i.valor)) : `${i.valor < 0 ? "−" : ""}${Math.abs(i.valor)} %`;
+  const estado = i => i.enMeta == null ? `<em class="e">${i.k === "sinAnotar" ? "falta conciliar" : "sin dato"}</em>`
+    : `<em class="e ${i.enMeta ? "bien" : "mal"}">${i.enMeta ? "✓ en meta" : "✕ fuera de meta"}</em>`;
+  return `<div class="card indicadores"><div class="card-t">Indicadores de ${MESES[Number(mes.slice(5)) - 1]} · ${en} de ${l.length} en meta</div>
+    ${l.map(i => `<div class="ind"><div class="ind-n">${i.nombre}<small>${i.que} · meta: ${i.meta}</small></div>
+      <div class="ind-v"><b>${valor(i)}</b>${estado(i)}</div></div>`).join("")}
+    <p class="pie">Metas de referencia. Con más del 30 % del ingreso en deudas, o gastando más de lo que entra, cualquier imprevisto se paga con más deuda.
+      ${l.find(i => i.k === "sinAnotar").valor == null ? "Lo sin anotar sale de la conciliación, en Gastos → Cierre del mes." : ""}</p></div>`;
 }
 function vencimientosHTML(F){
   const mes = FIN_MES || mesDelPlan(F), v = vencimientos(F, mes), manana = iso(addDays(parseISO(TODAY), 1));
@@ -2732,8 +2865,23 @@ function resumenGastosHTML(F, mes){
     ${!antes && pres ? barra(e.total, pres, e.total <= pres ? "var(--ok)" : "var(--fail)") : ""}
     ${e.total ? `<p class="tipos" style="margin:12px 0 0;font-size:14.5px">Necesario <b>${aPesos(e.necesario)}</b> (${pct(e.necesario)} %) · Gustos <b>${aPesos(e.gustos)}</b> (${pct(e.gustos)} %)</p>` : ""}
     ${!antes && pres && rit.dias >= 7 && rit.quedan > 0 ? `<p class="ritmo" style="margin:8px 0 0;font-size:14.5px">Para los ${rit.dias} días que quedan: unos <b>${aPesos(rit.porSemana)} por semana</b>.</p>` : ""}
+    ${mes === mesDe(TODAY) && disponibleHoy(F, TODAY) ? `<p class="hoy-puedes" style="margin:8px 0 0;font-size:14.5px">${textoDisponible(disponibleHoy(F, TODAY))}</p>` : ""}
     ${!antes && pres && e.proyeccion != null ? `<p class="proyeccion" style="margin:8px 0 0;font-size:14.5px">A este ritmo terminás el mes en <b>${aPesos(e.proyeccion)}</b>, el ${Math.round(100 * e.proyeccion / pres)} % del presupuesto.</p>` : ""}
     ${deCasa ? `<p class="pie">Además, ${aPesos(deCasa)} que ya están en los gastos de la casa: se ven, pero no suman.</p>` : ""}</div>`;
+}
+/* Hoy podés gastar: en Hoy y arriba de Gastos */
+function textoDisponible(d){
+  if(d.queda <= 0) return `El presupuesto del mes ya se gastó: hoy, <b>$ 0</b>${d.deHoy ? ` (llevás ${aPesos(d.deHoy)})` : ""}.`;
+  return `Hoy podés gastar <b>${aPesos(d.porDia)}</b>` + (!d.deHoy ? "." : d.resto >= 0 ? `: llevás ${aPesos(d.deHoy)}, te quedan ${aPesos(d.resto)}.`
+    : `: llevás ${aPesos(d.deHoy)}, te pasaste ${aPesos(-d.resto)}.`);
+}
+function disponibleHoyHTML(){
+  const F = S.finanzas, d = F && disponibleHoy(F, TODAY);
+  if(!d) return "";
+  return `<button class="card reflex hoy-gasto" data-act="irGastosHoy"><div class="card-t">Gastos · hoy</div>
+    <p class="frase" style="font-size:16px">${textoDisponible(d)}</p>
+    <small>Es lo que queda del presupuesto del mes (${aPesos(Math.max(0, d.queda))}) repartido en ${d.dias === 1 ? "el último día" : `los ${d.dias} días que faltan`}, hoy incluido.</small>
+    <span class="ver">Ir a Gastos</span></button>`;
 }
 function cargarGastoHTML(){
   const conClave = !!claveIA();
@@ -2775,7 +2923,7 @@ function diarioHTML(F, mes){
       : `<p style="margin:0;color:var(--muted);font-size:13.5px">${mes === mesDe(TODAY) ? "Todavía no cargaste gastos este mes." : "Ese mes no cargaste gastos."}</p>`}</div>`;
 }
 function filaGasto({ g, fecha, i }){
-  const detalle = [nombreCategoria(g.categoria), MEDIOS_CORTO[g.medio] || "", g.items?.length ? `${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket` : "",
+  const detalle = [nombreCategoria(g.categoria), g.medio === "cuotas" && g.cuotas ? `en ${g.cuotas} cuotas` : MEDIOS_CORTO[g.medio] || "", g.items?.length ? `${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket` : "",
                    g.deCasa ? "ya está en la casa" : ""].filter(Boolean).join(" · ");
   return `<div class="fila"><button class="ce" data-act="fgasto" data-d="${fecha}" data-i="${i}" aria-label="Ver ${esc(g.comercio)}">
       <span class="n">${esc(g.comercio)}<small>${detalle}</small></span><b>${aPesos(g.total)}</b></button>
@@ -2792,12 +2940,22 @@ function selectMedio(id, valor){
 const CHECK_CASA = (id, marcado) => `<label class="chk"><input type="checkbox" id="${id}"${marcado ? " checked" : ""}> Ya está en un gasto de la casa: no suma de nuevo</label>`;
 const camposGasto = (p, g) => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
     <div><label class="campo" for="${p}Cat">Categoría</label>${selectCategoria(p + "Cat", g.categoria)}</div>
-    <div><label class="campo" for="${p}Medio">Con qué pagaste</label>${selectMedio(p + "Medio", g.medio)}</div></div>${CHECK_CASA(p + "Casa", g.deCasa)}`;
-const leerCamposGasto = (p, $) => ({ categoria: $(`#${p}Cat`).value, medio: $(`#${p}Medio`).value, deCasa: $(`#${p}Casa`).checked });
-/* Pasa categoría, medio y "ya en la casa" al gasto: lo que no se eligió no se guarda */
+    <div><label class="campo" for="${p}Medio">Con qué pagaste</label>${selectMedio(p + "Medio", g.medio)}</div></div>
+  <div class="en-cuotas"${g.medio === "cuotas" ? "" : " hidden"}><label class="campo" for="${p}Cuotas">¿En cuántas cuotas?</label>
+    <input type="number" id="${p}Cuotas" inputmode="numeric" min="2" max="60" value="${g.medio === "cuotas" && g.cuotas ? g.cuotas : ""}" placeholder="Ej.: 3"></div>
+  ${CHECK_CASA(p + "Casa", g.deCasa)}`;
+/* Con "en cuotas" aparece la cantidad de cuotas */
+function atarMedio(p, $){
+  const sel = $(`#${p}Medio`);
+  sel.addEventListener("change", () => { $(".en-cuotas").hidden = sel.value !== "cuotas"; if(sel.value === "cuotas") $(`#${p}Cuotas`).focus(); });
+}
+const leerCamposGasto = (p, $) => ({ categoria: $(`#${p}Cat`).value, medio: $(`#${p}Medio`).value, cuotas: Number($(`#${p}Cuotas`).value), deCasa: $(`#${p}Casa`).checked });
+const cuotasValidas = c => c.medio !== "cuotas" || (Number.isInteger(c.cuotas) && c.cuotas >= 2 && c.cuotas <= 60);
+/* Pasa categoría, medio, cuotas y "ya en la casa" al gasto: lo que no se eligió no se guarda */
 function ponerCampos(g, c){
   g.categoria = c.categoria;
   if(c.medio) g.medio = c.medio; else delete g.medio;
+  if(c.medio === "cuotas") g.cuotas = c.cuotas; else delete g.cuotas;
   if(c.deCasa) g.deCasa = true; else delete g.deCasa;
   return g;
 }
@@ -2836,12 +2994,53 @@ function cierreHTML(F, mes){
   const pct = n => e.total ? Math.round(100 * n / e.total) : 0, temprano = mes === mesDe(TODAY) && parseISO(TODAY).getDate() < 25;
   return `<div class="card cierre"><div class="card-t">Cierre de ${MESES[Number(mes.slice(5)) - 1]} · ${hechos} de ${PASOS_CIERRE.length}</div>
     ${temprano ? `<p style="margin:0 0 4px;font-size:13px;color:var(--muted)">Se hace el último día del mes o en los primeros del siguiente.</p>` : ""}
+    ${conciliacionHTML(F, mes)}
     ${PASOS_CIERRE.map(([k, t]) => `<div class="fila${c[k] ? " pagado" : ""}"><span class="n">${t}</span>
       <button class="pq${c[k] ? " ok" : ""}" data-act="gcierre" data-k="${k}" data-m="${mes}" aria-pressed="${!!c[k]}" aria-label="${t}">✓</button></div>`).join("")}
     ${pasados.length ? `<p class="pie">Te pasaste en ${pasados.slice(0, 3).map(x => `${x.nombre} (+${aPesos(x.gastado - x.presupuesto)})`).join(", ")}.</p>` : ""}
     ${hechos === PASOS_CIERRE.length ? `<p class="cerrado" style="margin:10px 0 0;font-size:14.5px"><b>Mes cerrado ✓</b> Gastaste ${aPesos(e.total)}${pres ? ` de ${aPesos(pres)} (${Math.round(100 * e.total / pres)} %)` : ""};
       gustos ${pct(e.gustos)} %; con tarjeta ${pct(e.medios.tarjeta + e.medios.cuotas)} %.</p>` : ""}
     <button class="btn ghost" data-act="gpres">Cambiar presupuestos</button></div>`;
+}
+
+/* La conciliación del mes: con las dos fotos del saldo, lo que se fue sin anotar */
+function conciliacionHTML(F, mes){
+  const c = conciliacionMes(F, mes), fila = (t, n, sub) => `<div class="renglon"><span>${t}${sub ? ` <small style="color:var(--muted)">${sub}</small>` : ""}</span><b>${n}</b></div>`;
+  const cuerpo = !c.listo
+    ? `<p style="margin:0;font-size:13.5px;line-height:1.5">Anotá cuánta plata tenés (banco, Mercado Pago y efectivo) al empezar y al terminar el mes: lo que salió y no está anotado es lo que se fue sin ver.
+        ${c.inicio != null ? `<br>Al empezar: <b>${aPesos(c.inicio)}</b>.` : ""}</p>`
+    : fila("Salió", aPesos(c.salio), `empezaste con ${aPesos(c.inicio)}, entró ${aPesos(c.entro)}, terminaste con ${aPesos(c.fin)}`)
+      + fila("Anotado", aPesos(c.anotado), `pagos marcados ${aPesos(c.pagado)} + gastos sin tarjeta ${aPesos(c.gastado)}`)
+      + (c.sinAnotar >= 0
+        ? `<p class="sin-anotar" style="margin:8px 0 0;font-size:14.5px">Sin anotar: <b>${aPesos(c.sinAnotar)}</b>, el ${c.pct} % de lo que salió. Meta: menos de 10 %.
+            ${c.pct < 10 ? "✓ En meta." : "✕ Fuera de meta: revisá los movimientos del banco y de Mercado Pago."}</p>`
+        : `<p class="sin-anotar" style="margin:8px 0 0;font-size:14.5px">Anotaste ${aPesos(-c.sinAnotar)} más de lo que salió: fijate que lo marcado como pagado se haya pagado este mes y lo que entró.</p>`);
+  return `<p class="frec-t">Conciliación</p>${cuerpo}<button class="btn ghost" data-act="gconc" data-m="${mes}">${c.listo ? "Cambiar los saldos" : c.inicio != null ? "Cargar el saldo final" : "Cargar los saldos"}</button>`;
+}
+function editarConciliacion(mes){
+  const F = fin(), c = conciliacionMes(F, mes), nombre = MESES[Number(mes.slice(5)) - 1];
+  const plan = [...(F.ingresos || []).map(i => [i.nombre, ingresoDelMes(i, mes)]).filter(([, n]) => n),
+                ...(F.movimientos || []).filter(m => m.mes === mes).map(m => [m.nombre, m.monto])];
+  sheet(`<h3>Conciliación de ${nombre}</h3>
+    <p class="sub">La plata que tenés en el banco, en Mercado Pago y en efectivo, todo junto. La primera, el primer día del mes; la segunda, el último.</p>
+    <label class="campo" for="cInicio">Al empezar ${nombre}</label><input type="number" id="cInicio" inputmode="numeric" min="0" value="${c.inicio ?? ""}">
+    <label class="campo" for="cEntro">Lo que entró en el medio</label><input type="number" id="cEntro" inputmode="numeric" min="0" value="${c.entro}">
+    <p class="pie" style="margin-top:6px">Lo del plan: ${plan.map(([t, n]) => `${esc(t)} ${conSigno(n)}`).join(" · ") || "nada"} = ${aPesos(c.plan)}.
+      Un sueldo de fin de mes se compensa: el del mes anterior ya está en la primera foto y el de fin de ${nombre} entra antes de la segunda.
+      Cambialo solo si algo no entró o entró distinto.</p>
+    <label class="campo" for="cFin">Al terminar ${nombre}</label><input type="number" id="cFin" inputmode="numeric" min="0" value="${c.fin ?? ""}" placeholder="El último día del mes">
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const leer = id => { const t = $(id).value.trim(); return t === "" ? null : Math.round(Number(t)); };
+    const v = { inicio: leer("#cInicio"), entro: leer("#cEntro"), fin: leer("#cFin") };
+    if(Object.values(v).some(n => n != null && !(n >= 0 && n <= 1e10))){ toast("Revisá los montos"); return; }
+    if(v.entro === c.plan) v.entro = null;            // igual al plan: sigue al plan
+    const n = Object.fromEntries(Object.entries(v).filter(([, x]) => x != null));
+    if(Object.keys(n).length) F.conciliacion[mes] = n; else delete F.conciliacion[mes];
+    save(); closeSheet(); render(); toast(n.inicio != null && n.fin != null ? "Conciliación lista" : "Saldo guardado");
+  };
 }
 
 /* ---- cómo vamos: gráficos y estadísticas, porque lo que no se mide no se mejora ---- */
@@ -2960,12 +3159,13 @@ function gastoAMano(){
     ${camposGasto("g", { categoria: "super", medio: "debito" })}
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
   const $ = q => modal.querySelector(q);
-  $("#gNombre").focus();
+  $("#gNombre").focus(); atarMedio("g", $);
   $('[data-x="c"]').onclick = closeSheet;
   $('[data-x="o"]').onclick = () => {
     const comercio = $("#gNombre").value.trim(), total = Math.round(Number($("#gTotal").value)), fecha = $("#gFecha").value;
     if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
     if(!esFechaValida(fecha) || fecha > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    if(!cuotasValidas(leerCamposGasto("g", $))){ toast("Poné en cuántas cuotas (de 2 a 60)"); return; }
     const g = ponerCampos({ comercio: comercio.slice(0, 60), total, origen: "mano" }, leerCamposGasto("g", $));
     closeSheet(); guardarGasto(g, fecha);
   };
@@ -2986,11 +3186,13 @@ function editarGasto(fecha, i){
     ${renglonesTicket(g.items)}${g.nota ? `<p class="detalle">${esc(g.nota)}</p>` : ""}
     <div class="row2"><button class="btn ghost danger" data-x="b">Borrar</button><button class="btn" data-x="o">Guardar</button></div>`);
   const $ = q => modal.querySelector(q);
+  atarMedio("e", $);
   $('[data-x="b"]').onclick = () => confirmarBorradoGasto(fecha, i);
   $('[data-x="o"]').onclick = () => {
     const comercio = $("#eComercio").value.trim(), total = Math.round(Number($("#eTotal").value)), nueva = $("#eFecha").value;
     if(!comercio || !(total > 0 && total <= 1e9)){ toast("Poné dónde y cuánto"); return; }
     if(!esFechaValida(nueva) || nueva > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    if(!cuotasValidas(leerCamposGasto("e", $))){ toast("Poné en cuántas cuotas (de 2 a 60)"); return; }
     ponerCampos(Object.assign(g, { comercio: comercio.slice(0, 60), total }), leerCamposGasto("e", $));
     if(nueva !== fecha){ borrarGasto(fecha, i); (F.gastos[nueva] ||= []).push(g); }
     save(); closeSheet(); render(); toast("Gasto actualizado");
@@ -3210,6 +3412,9 @@ function onAct(e){
     case "irGastos": TAB = "gastos"; GASTOS_MES = FIN_MES && FIN_MES <= mesDe(TODAY) ? FIN_MES : null; render(); break;
     case "gmes": { const m = sumarMeses(GASTOS_MES || mesDe(TODAY), +el.dataset.n); GASTOS_MES = m >= mesDe(TODAY) ? null : m; render(); break; }
     case "gpres": editarPresupuestos(); break;
+    case "gconc": editarConciliacion(el.dataset.m); break;
+    case "ftarjeta": verTarjeta(el.dataset.m); break;
+    case "irGastosHoy": TAB = "gastos"; GASTOS_MES = null; render(); window.scrollTo(0, 0); break;
     case "gcierre": marcarCierre(el.dataset.m, el.dataset.k); break;
     case "gdia": document.getElementById("gdet").textContent = GASTOS_DIAS[+el.dataset.i] || ""; break;
     case "gmesbar": document.getElementById("gdet2").textContent = GASTOS_MESES[+el.dataset.i] || ""; break;
@@ -3460,7 +3665,7 @@ function validarFinanzas(f){
   if(f.gastos != null && !(esObj(f.gastos) && Object.entries(f.gastos).every(([d, l]) => esFecha(d) && Array.isArray(l)
       && l.every(g => esObj(g) && typeof g.comercio === "string" && plata(g.total) && (g.items == null || Array.isArray(g.items))
         && (g.categoria == null || Object.hasOwn(CATEGORIAS_GASTO, g.categoria)) && (g.deCasa == null || typeof g.deCasa === "boolean")
-        && (g.medio == null || Object.hasOwn(MEDIOS_PAGO, g.medio))))))
+        && (g.medio == null || Object.hasOwn(MEDIOS_PAGO, g.medio)) && (g.cuotas == null || (Number.isInteger(g.cuotas) && g.cuotas >= 1 && g.cuotas <= 60))))))
     throw new Error(`En finanzas, "gastos" está roto.`);
   if(f.pagos != null && !(esObj(f.pagos) && Object.entries(f.pagos).every(([m, l]) => esMes(m) && Array.isArray(l) && l.every(x => typeof x === "string"))))
     throw new Error(`En finanzas, "pagos" está roto.`);
@@ -3471,6 +3676,12 @@ function validarFinanzas(f){
     throw new Error("En finanzas, los presupuestos por categoría están rotos.");
   if(f.cierres != null && !(esObj(f.cierres) && Object.entries(f.cierres).every(([m, c]) => esMes(m) && esObj(c) && Object.values(c).every(v => typeof v === "boolean"))))
     throw new Error("En finanzas, los cierres del mes están rotos.");
+  if(f.enResumen != null && !(esObj(f.enResumen) && Object.entries(f.enResumen).every(([m, v]) => esMes(m) && typeof v === "boolean")))
+    throw new Error("En finanzas, lo de la tarjeta ya en el resumen está roto.");
+  if(!dia(f.cierreTarjeta)) throw new Error("En finanzas, el día de cierre de la tarjeta está roto.");
+  if(f.conciliacion != null && !(esObj(f.conciliacion) && Object.entries(f.conciliacion).every(([m, c]) => esMes(m) && esObj(c)
+      && Object.entries(c).every(([k, n]) => ["inicio", "entro", "fin"].includes(k) && plata(n) && n <= 1e10))))
+    throw new Error("En finanzas, la conciliación está rota.");
 }
 /* Cómo quedan tus finanzas después de importar, sin tocar nada todavía, y qué decirte.
    { finanzas } reemplaza cada parte que trae (de un respaldo entero o de un archivo
@@ -3496,6 +3707,13 @@ function finanzasImportadas(actual, data){
     if(!esObj(data.actualizar)) throw new Error(`El campo "actualizar" está roto.`);
     const suma = [], cambia = [];
     for(const [k, v] of Object.entries(data.actualizar)){
+      if(k === "presupuestos" && esObj(v)){           // por categoría: cambia las que trae, 0 la saca
+        const p = { ...(f.presupuestos || presupuestosIniciales(f)) };
+        for(const [c, n] of Object.entries(v)) if(n === 0) delete p[c]; else p[c] = n;
+        f.presupuestos = p;
+        partes.push(`Cambia el presupuesto de ${Object.keys(v).map(c => nombreCategoria(c)).join(", ")}.`);
+        continue;
+      }
       if(!LISTAS_FINANZAS.includes(k)){ f[k] = v; continue; }
       if(!Array.isArray(v) || !v.every(x => esObj(x) && typeof x.id === "string")) throw new Error(`En "actualizar", "${k}" está roto.`);
       for(const x of v){
@@ -3504,8 +3722,8 @@ function finanzasImportadas(actual, data){
       }
     }
     const lista = l => l.map(t => `«${t}»`).join(", ");
-    partes.push([suma.length ? `Suma ${lista(suma)}` : "", cambia.length ? `${suma.length ? "y cambia" : "Cambia"} ${lista(cambia)}` : ""]
-      .filter(Boolean).join(" ") + ". Lo demás queda como está.");
+    const que = [suma.length ? `Suma ${lista(suma)}` : "", cambia.length ? `${suma.length ? "y cambia" : "Cambia"} ${lista(cambia)}` : ""].filter(Boolean).join(" ");
+    partes.push((que ? que + ". " : "") + "Lo demás queda como está.");
   }
   validarFinanzas(f);
   return { nuevo: f, texto: partes.join(" ") + " Hábitos y comidas no se tocan.", reemplaza: data.finanzas != null };
@@ -4010,6 +4228,7 @@ const PROMPT_TICKET = `Leés tickets, facturas y comprobantes de pago de Argenti
 - comercio: el nombre del negocio como aparece (por ejemplo "Coto", "Carrefour Market", "Verdulería Don José"); vacío si no se lee.
 - fecha: la del ticket, como AAAA-MM-DD. Si no trae el año, usá el de la fecha de hoy que te dice la persona; vacía si no se lee.
 - medio: cómo se pagó, si se ve. debito: débito, efectivo, transferencia, dinero en cuenta o tarjeta prepaga. tarjeta: tarjeta de crédito en un pago. cuotas: tarjeta de crédito en cuotas. Vacío si no se ve.
+- cuotas: si se pagó en cuotas y se ve en cuántas, ese número; si no, 0.
 - categoria: la que mejor describe el gasto entero. super: súper y almacén. fresco: verdulería, carnicería, pollería. delivery: delivery, rotisería, pizzería, comida hecha para llevar. kiosco: kiosco, café, snacks. salidas: cine, bares, restaurantes, entretenimiento. transporte: taxi, Uber, Didi, nafta, colectivo. suscripciones: streaming, apps y servicios digitales. familia: regalos y cosas para la familia. personal: ropa, tecnología, libros, hobbies. casa: limpieza, ferretería, arreglos. salud: farmacia y médicos. mascotas: alimento, veterinaria y cosas de las mascotas. otros: lo que no entra en ninguna.
 - Los importes argentinos llevan punto en los miles y coma en los decimales: $ 12.345,67 son doce mil trescientos cuarenta y cinco pesos con 67 centavos.
 - Si hay varias fotos, son partes del mismo ticket: no repitas los renglones que aparecen en dos.
@@ -4024,6 +4243,7 @@ const ESQUEMA_TICKET = {
     fecha: { type: "string" },
     categoria: { type: "string", enum: Object.keys(CATEGORIAS_GASTO) },
     medio: { type: "string", enum: [...Object.keys(MEDIOS_PAGO), ""] },
+    cuotas: { type: "integer" },
     items: { type: "array", items: { type: "object", properties: {
       nombre: { type: "string" }, cantidad: { type: "number" }, precio: { type: "number" } },
       required: ["nombre", "cantidad", "precio"], additionalProperties: false } },
@@ -4031,7 +4251,7 @@ const ESQUEMA_TICKET = {
     nota: { type: "string" },
     confianza: { type: "string", enum: ["alta", "media", "baja"] }
   },
-  required: ["comercio", "fecha", "categoria", "medio", "items", "total", "nota", "confianza"], additionalProperties: false
+  required: ["comercio", "fecha", "categoria", "medio", "cuotas", "items", "total", "nota", "confianza"], additionalProperties: false
 };
 async function analizarTicket(fotos, texto){
   const n = fotos.length;
@@ -4047,16 +4267,18 @@ function mostrarTicket(r){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="tTotal">Total</label><input type="number" id="tTotal" inputmode="numeric" min="0" value="${r.total}"></div>
       <div><label class="campo" for="tFecha">Cuándo</label><input type="date" id="tFecha" max="${TODAY}" value="${fecha}"></div></div>
-    ${camposGasto("t", { categoria: r.categoria || "otros", medio: r.medio })}
+    ${camposGasto("t", { categoria: r.categoria || "otros", medio: r.medio, cuotas: r.cuotas })}
     ${renglonesTicket(r.items)}` : ""}
     ${r.nota ? `<p style="font-size:13px;color:var(--ink-2);margin:10px 0 0;line-height:1.5">${esc(r.nota)}</p>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c">Descartar</button>${hay ? `<button class="btn" data-x="o">Guardar</button>` : ""}</div>`);
   const $ = q => modal.querySelector(q);
+  if(hay) atarMedio("t", $);
   $('[data-x="c"]').onclick = closeSheet;
   $('[data-x="o"]')?.addEventListener("click", () => {
     const total = Math.round(Number($("#tTotal").value)), dia = $("#tFecha").value;
     if(!(total > 0 && total <= 1e9)){ toast("Poné el total del ticket"); return; }
     if(!esFechaValida(dia) || dia > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    if(!cuotasValidas(leerCamposGasto("t", $))){ toast("Poné en cuántas cuotas (de 2 a 60)"); return; }
     const g = ponerCampos({ comercio: ($("#tComercio").value.trim() || "Ticket").slice(0, 60), total, origen: "ticket" }, leerCamposGasto("t", $));
     if(r.items.length) g.items = r.items;
     if(r.nota) g.nota = r.nota;
@@ -4079,7 +4301,8 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* pasos */ metaPasos, marcarPorPasos, pasosDeRegistros, mezclarPasos, rangoPasos, moverPasos, resumenPasos, resumenAnual, sincronizarPasos,
   /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS,
-  /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes };
+  /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes,
+  /* caja */ tarjetaDelMes, conciliacionMes, indicadoresMes, disponibleHoy, deudaNuevaDelMes };
 </script>
 </body>
 </html>
