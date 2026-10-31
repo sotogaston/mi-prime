@@ -1388,7 +1388,7 @@ console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con 
   ok('con lo que entra, la casa, alimentos y cuotas', /Entra\s+\+ \$ 2\.000\.000/.test(cuentas) && /Casa\s+− \$ 800\.000/.test(cuentas)
     && /Alimentos\s+− \$ 400\.000/.test(cuentas) && /Cuotas\s+− \$ 550\.000/.test(cuentas));
   ok('lo de un solo mes aparece aparte, y cuánto falta pagar', /Descuento del adelanto\s+− \$ 300\.000/.test(await p.locator('.fin-mes').innerText())
-    && /Falta pagar \$ 1\.350\.000 de cuotas y gastos y \$ 400\.000 de alimentos/.test(await p.locator('.fin-mes .pie').innerText()));
+    && /Falta pagar \$ 1\.350\.000 de cuotas y de la casa, y \$ 400\.000 de alimentos/.test(await p.locator('.fin-mes .pie').innerText()));
   ok('no se puede ir antes del primer mes del plan', await p.locator('[data-act="fmes"][data-n="-1"]').isDisabled());
   const venc = await p.locator('.venc').innerText();
   ok('vencimientos de noviembre en orden, con "vence mañana" y lo sin fecha al final', /0 de 5 pagados/i.test(venc)
@@ -1436,10 +1436,11 @@ console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con 
   const alim = () => p.locator('.alimentos').innerText();
   ok('alimentos de noviembre: $ 0 de $ 400.000, unos $ 77.800 por semana', /Alimentos · noviembre 2026/i.test(await alim())
     && /\$ 0\s+de \$ 400\.000 · quedan \$ 400\.000/.test(await alim()) && /Para los 27 días que quedan: unos \$ 103\.700 por semana/.test(await alim()));
-  await p.locator('[data-act="fmano"]').click();
+  await p.locator('.alimentos [data-act="fmano"]').click();
   await p.locator('#gNombre').fill('Verdulería'); await p.locator('#gTotal').fill('25000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('agregar a mano: $ 25.000, quedan $ 375.000', /\$ 25\.000\s+de \$ 400\.000 · quedan \$ 375\.000/.test(await alim())
-    && (await S()).finanzas.gastos['2026-11-04'][0].comercio === 'Verdulería' && /4\/11\s+Verdulería\s+\$ 25\.000/.test(await alim()));
+    && (await S()).finanzas.gastos['2026-11-04'][0].comercio === 'Verdulería' && (await S()).finanzas.gastos['2026-11-04'][0].categoria === 'super'
+    && /4\/11\s+Verdulería\s+Súper y almacén\s+\$ 25\.000/.test(await alim()));
   await p.locator('[data-act="fgasto"]').first().click();
   await p.locator('#eTotal').fill('30000'); await p.locator('#eFecha').fill('2026-10-31'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('editar el total y la fecha lo pasa a octubre', !(await S()).finanzas.gastos['2026-11-04'] && (await S()).finanzas.gastos['2026-10-31'][0].total === 30000
@@ -1449,7 +1450,7 @@ console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con 
   await p.locator('[data-act="fborrarGasto"]').first().click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('borrar un gasto pide confirmación', !(await S()).finanzas.gastos['2026-10-31']);
   await p.locator('.alimentos [data-act="amover"][data-n="1"]').click(); await p.waitForTimeout(100);
-  await p.locator('[data-act="fpres"]').last().click(); await p.locator('#presu').fill('500000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  await p.locator('.alimentos [data-act="fpres"]').click(); await p.locator('#presu').fill('500000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
   ok('el presupuesto se cambia', (await S()).finanzas.presupuestoAlimentos === 500000 && /\$ 0\s+de \$ 500\.000/.test(await alim()));
   // Ticket con Claude (simulado)
   const pedidos = [];
@@ -1464,11 +1465,11 @@ console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con 
         total: 5000, nota: 'Ningún producto de limpieza.', confianza: 'alta' }) }] }) });
   });
   const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
-  await p.locator('[data-act="fticket"]').click(); await p.waitForTimeout(100);
+  await p.locator('.alimentos [data-act="fticket"]').click(); await p.waitForTimeout(100);
   ok('para el ticket primero pide la clave de Anthropic', await p.locator('.sheet #clave').count() === 1);
   await p.locator('.sheet [data-x="c"]').click();
   await p.evaluate(() => localStorage.setItem('miPrime.claveIA', 'sk-ant-api03-' + 'x'.repeat(40)));
-  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fticket"]').click()]);
+  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('.alimentos [data-act="fticket"]').click()]);
   ok('"Foto del ticket" abre la cámara', (await fc.element().getAttribute('capture')) === 'environment');
   await fc.setFiles({ name: 'ticket.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
   ok('la hoja es del ticket: si es largo, se saca en partes', /Ticket de compra/.test(await p.locator('.sheet h3').innerText())
@@ -1476,15 +1477,16 @@ console.log('\n== 37. Finanzas en la web: el mes, pagar, alimentos y ticket con 
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
   const q = pedidos.at(-1), img = q?.body.messages[0].content.find(b => b.type === 'image'), txt = q?.body.messages[0].content.find(b => b.type === 'text');
   ok('manda la foto a Claude Opus 5.5 con el prompt de tickets y su JSON schema', q && q.body.model === 'claude-opus-5-5' && img?.source.media_type === 'image/jpeg'
-    && /tickets y facturas de compra/.test(q.body.system) && /precio negativo/.test(q.body.system) && /Leé este ticket/.test(txt?.text)
-    && q.body.output_config?.format?.schema.required.join() === 'comercio,fecha,items,total,nota,confianza' && q.body.fallbacks === 'default');
+    && /tickets, facturas y comprobantes de pago/.test(q.body.system) && /precio negativo/.test(q.body.system) && /Hoy es 2026-11-04\. Leé este ticket/.test(txt?.text)
+    && q.body.output_config?.format?.schema.required.join() === 'comercio,fecha,categoria,items,total,nota,confianza' && q.body.fallbacks === 'default');
   const hoja = await p.locator('.sheet').innerText();
   ok('muestra lo que leyó: Coto, $ 5.000, del 3/11, con los renglones y el descuento', /Lo que leyó Claude/.test(hoja)
     && (await p.locator('#tComercio').inputValue()) === 'Coto' && (await p.locator('#tTotal').inputValue()) === '5000'
     && (await p.locator('#tFecha').inputValue()) === '2026-11-03' && /Leche entera × 2\s+\$ 3\.000/.test(hoja) && /Descuento leche\s+− \$ 500/.test(hoja));
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   const g = (await S()).finanzas.gastos['2026-11-03']?.[0];
-  ok('se guarda con todo: comercio, total, renglones y nota', g?.comercio === 'Coto' && g.total === 5000 && g.origen === 'ticket' && g.items.length === 3 && /limpieza/.test(g.nota)
+  ok('se guarda con todo: comercio, total, categoría, renglones y nota', g?.comercio === 'Coto' && g.total === 5000 && g.origen === 'ticket' && g.items.length === 3 && /limpieza/.test(g.nota)
+    && g.categoria === 'super'
     && /\$ 5\.000\s+de \$ 500\.000/.test(await alim()) && /3 renglones del ticket/.test(await alim()));
   await p.locator('[data-act="fgasto"]').first().click();
   ok('y tocándolo se ve el detalle', /leído de la foto del ticket/.test(await p.locator('.sheet').innerText()) && /Pan\s+\$ 2\.500/.test(await p.locator('.sheet').innerText()));
@@ -1611,7 +1613,7 @@ console.log('\n== 39. Hábitos de finanzas y a dónde vas ==');
     && await marca('Anotar lo que gasto') === '' && /nada anotado hoy/.test(await fila('Anotar lo que gasto').innerText())
     && /\$ 0 de \$ 146\.667 hasta hoy/.test(await fila('Alimentos al ritmo').innerText()) && /al día/.test(await fila('Vencimientos al día').innerText()));
   await ir(p, 'finanzas');
-  await p.locator('[data-act="fmano"]').click(); await p.locator('#gNombre').fill('Súper'); await p.locator('#gTotal').fill('200000');
+  await p.locator('.alimentos [data-act="fmano"]').click(); await p.locator('#gNombre').fill('Súper'); await p.locator('#gTotal').fill('200000');
   await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   await ir(p, 'hoy');
   ok('cargado un gasto: anotar en verde; 200 mil se adelanta al ritmo y queda amarillo',
@@ -1697,7 +1699,104 @@ console.log('\n== 40. Actualizar finanzas con un resumen nuevo ==');
   await c.close();
 }
 
-console.log('\n== 41. Capturas ==');
+console.log('\n== 41. Gastos aparte de alimentos y dónde se va la plata ==');
+{
+  const L = cargarLogica(estado());
+  const G = { '2026-11-02': [{ id: 'a', comercio: 'Coto', total: 120000, categoria: 'super' }, { id: 'b', comercio: 'Kiosco', total: 3000, categoria: 'kiosco' }],
+              '2026-11-03': [{ id: 'c', comercio: 'Hoyts', total: 26550, categoria: 'salidas' }, { id: 'd', comercio: 'Didi', total: 14000, categoria: 'transporte' },
+                             { id: 'e', comercio: 'HBO Max', total: 12265, categoria: 'suscripciones', deCasa: true }, { id: 'f', comercio: 'Didi', total: 9000, categoria: 'transporte' }],
+              '2026-10-28': [{ id: 'g', comercio: 'Verdulería', total: 8000 }] };
+  ok('cada gasto va a su rubro por su categoría; los viejos, sin categoría, son alimentos',
+    L.rubroDe({ categoria: 'salidas' }) === 'gastos' && L.rubroDe({}) === 'alimentos' && L.rubroDe({ categoria: 'xx' }) === 'alimentos');
+  const F = { ...finanzas(), gastos: G }, r = L.resumenMes(F, '2026-11', '2026-11-04');
+  ok('el mes resta los gastos aparte de alimentos, sin lo que ya está en la casa: faltan 99.550',
+    r.gastadoGastos === 49550 && r.gastos === 49550 && r.alimentos === 400000 && r.gastado === 123000 && r.sobra === -99550);
+  const conP = { ...F, presupuestoGastos: 100000 };
+  ok('con presupuesto de gastos, cuenta el presupuesto hasta que se pase, y entra en un mes de gastos',
+    L.resumenMes(conP, '2026-11', '2026-11-04').gastos === 100000 && L.resumenMes(conP, '2026-12', '2026-11-04').gastos === 100000 && L.gastoMensual(conP) === 1300000);
+  const a = L.analisisGastos(G, '2026-11-02', '2026-11-08');
+  ok('dónde se va la plata: por categoría de mayor a menor, los hormiga y lo que ya estaba en la casa',
+    a.total === 184815 && a.n === 6 && a.categorias.map(c => c.categoria).join() === 'super,salidas,transporte,suscripciones,kiosco'
+    && a.hormiga.n === 4 && a.hormiga.total === 38265 && a.deCasa === 12265 && a.alimentos === 123000 && a.gastos === 61815);
+  ok('y los comercios, con cuántas veces', a.comercios[0].nombre === 'Coto' && a.comercios.find(c => c.nombre === 'Didi').n === 2
+    && a.comercios.find(c => c.nombre === 'Didi').total === 23000);
+  ok('Claude propone la categoría; si no es una de la lista, queda vacía',
+    L.normalizarTicket({ categoria: 'salidas', items: [] }).categoria === 'salidas' && L.normalizarTicket({ categoria: 'joda' }).categoria === '');
+
+  const { p, c, errs } = await abrirEn('2026-11-04', { ...estado({ lastClosed: '2026-11-03' }), finanzas: finanzas() });
+  const S = () => p.evaluate(() => window.__prime.S);
+  const gastos = () => p.locator('.gastos-var').innerText(), cuentas = () => p.locator('.fin-mes .cuentas').innerText();
+  await ir(p, 'finanzas');
+  ok('dos tarjetas: alimentos con su presupuesto y gastos, sin presupuesto todavía', /Alimentos · noviembre 2026/i.test(await p.locator('.alimentos').innerText())
+    && /\$ 0\s+en noviembre · sin presupuesto todavía/.test(await gastos()) && /Medilo un mes/.test(await gastos()));
+  await p.locator('.gastos-var [data-act="fmano"]').click();
+  ok('desde Gastos, la categoría arranca en Otros', (await p.locator('#gCat').inputValue()) === 'otros' && /Agregar un gasto/.test(await p.locator('.sheet h3').innerText()));
+  await p.locator('#gNombre').fill('Didi al cine'); await p.locator('#gTotal').fill('14000'); await p.locator('#gCat').selectOption('transporte');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('queda en Gastos y no en Alimentos, y el mes lo resta: faltan $ 64.000', /Didi al cine\s+Transporte\s+\$ 14\.000/.test(await gastos())
+    && !/Didi/.test(await p.locator('.alimentos').innerText()) && /Gastos\s+− \$ 14\.000/.test(await cuentas())
+    && /\$ 64\.000\s+te faltan/.test(await p.locator('.fin-mes .hero').innerText()));
+  await p.locator('.gastos-var [data-act="fmano"]').click();
+  await p.locator('#gNombre').fill('HBO Max'); await p.locator('#gTotal').fill('12265'); await p.locator('#gCat').selectOption('suscripciones'); await p.locator('#gCasa').check();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('lo que ya está en la casa se ve, pero no suma de nuevo', /HBO Max\s+Suscripciones y apps · ya está en la casa/.test(await gastos())
+    && /Gastos\s+− \$ 14\.000/.test(await cuentas()) && /\$ 14\.000\s+en noviembre/.test(await p.locator('.gastos-var .hero').innerText()));
+  // Un comprobante desde Gastos: Claude propone la categoría
+  const pedidos = [];
+  await c.route('https://api.anthropic.com/**', async route => {
+    const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    pedidos.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify({
+      id: 'msg_s', type: 'message', role: 'assistant', model: 'claude-opus-5-5', stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 900, output_tokens: 150 },
+      content: [{ type: 'text', text: JSON.stringify({ comercio: 'Hoyts', fecha: '2026-11-03', categoria: 'salidas', items: [{ nombre: 'Entradas de cine', cantidad: 2, precio: 26550 }],
+        total: 26550, nota: '', confianza: 'alta' }) }] }) });
+  });
+  await p.evaluate(() => localStorage.setItem('miPrime.claveIA', 'sk-ant-api03-' + 'x'.repeat(40)));
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  const [fc] = await Promise.all([p.waitForEvent('filechooser'), p.locator('.gastos-var [data-act="fticket"]').click()]);
+  await fc.setFiles({ name: 'comprobante.png', mimeType: 'image/png', buffer: PNG }); await p.waitForTimeout(300);
+  ok('desde Gastos la hoja es de ticket o comprobante', /Ticket o comprobante/.test(await p.locator('.sheet h3').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(1500);
+  const txt = pedidos.at(-1)?.messages[0].content.find(b => b.type === 'text')?.text || '';
+  ok('le dice a Claude la fecha de hoy y que no es comida, y pide la categoría', /Hoy es 2026-11-04\./.test(txt) && /no es comida/.test(txt)
+    && /salidas/.test(JSON.stringify(pedidos.at(-1).output_config.format.schema.properties.categoria)) && /categoria: la que mejor describe/.test(pedidos.at(-1).system));
+  ok('la categoría que propone Claude viene elegida', (await p.locator('#tCat').inputValue()) === 'salidas');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('y se guarda en Gastos con su categoría', (await S()).finanzas.gastos['2026-11-03'][0].categoria === 'salidas' && /Hoyts\s+Salidas y entretenimiento/.test(await gastos()));
+  // Dónde se va la plata
+  let ana = await p.locator('.analisis').innerText();
+  ok('la semana: total, por categoría de mayor a menor con su porcentaje, los hormiga y lo que ya estaba en la casa',
+    /2 al 8 de noviembre/.test(ana) && /\$ 52\.815\s+en la semana · alimentos \$ 0 · gastos \$ 52\.815/.test(ana)
+    && ana.indexOf('Salidas') < ana.indexOf('Transporte') && ana.indexOf('Transporte') < ana.indexOf('Suscripciones') && /50 % del total/.test(ana)
+    && /Gastos hormiga: 2 de menos de \$ 20\.000 que suman \$ 26\.265, el 50 % de lo gastado/.test(ana)
+    && /\$ 12\.265 de esto ya estaba en los gastos de la casa/.test(ana) && await p.locator('.analisis .cat').count() === 3);
+  await p.locator('.analisis [data-act="avista"][data-v="mes"]').click(); await p.waitForTimeout(100);
+  ana = await p.locator('.analisis').innerText();
+  ok('y el mes', /Noviembre 2026/.test(ana) && /\$ 52\.815\s+en el mes/.test(ana) && await p.locator('.analisis [data-act="amov"][data-n="1"]').isDisabled());
+  await p.locator('.analisis [data-act="amov"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  ok('un mes sin gastos lo dice', /Octubre 2026/.test(await p.locator('.analisis').innerText()) && /No cargaste gastos ese mes/.test(await p.locator('.analisis').innerText()));
+  // Presupuesto de gastos
+  await p.locator('.gastos-var [data-act="fpres"]').click(); await p.locator('#presu').fill('100000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('con presupuesto, Gastos dice cuánto queda y el mes cuenta el presupuesto', /\$ 40\.550\s+de \$ 100\.000 · quedan \$ 59\.450/.test(await gastos())
+    && /Gastos\s+− \$ 100\.000/.test(await cuentas()) && (await S()).finanzas.presupuestoGastos === 100000);
+  // Editar la categoría de un gasto
+  await p.locator('.gastos-var .fila', { hasText: 'Didi al cine' }).locator('.ce').click();
+  await p.locator('#eCat').selectOption('salidas'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('la categoría se cambia desde el gasto', /Didi al cine\s+Salidas y entretenimiento/.test(await gastos()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const g of [{ comercio: 'x', total: 1, categoria: 'salidas', deCasa: true }, { comercio: 'x', total: 1, categoria: 'joda' }, { comercio: 'x', total: 1, deCasa: 'si' }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, finanzas: { ...base.finanzas, gastos: { '2026-11-01': [g] } } })); r.push('ok'); } catch (e) { r.push('no'); }
+    try { P.prepararRespaldo(JSON.stringify({ ...base, finanzas: { ...base.finanzas, presupuestoGastos: -1 } })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae categorías y presupuesto de gastos, y rechaza los rotos (' + resp + ')', resp === 'ok,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 42. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

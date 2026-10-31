@@ -219,15 +219,30 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   para marcarlo pagado, y cuánto falta pagar. Hoy muestra lo que vence hoy y
   mañana, y lo que venció sin marcar; la app de Android avisa el día antes a
   las 10. Un día 31 en un mes de 30 cae el 30.
-- **Alimentos**: el presupuesto del mes (600.000 si no se cambia) contra lo
-  gastado, y cuánto queda por semana para lo que falta. Cada gasto se carga
-  **a mano** o con **la foto del ticket**: Claude Opus 5.5 lee el comercio, la
-  fecha, cada renglón (los descuentos en negativo) y el total, y antes de
-  guardar se corrige. Se guarda todo menos la foto. Un ticket largo va en hasta
-  4 fotos, a 2048 px para que se lea la letra chica, con la misma clave de
-  Anthropic que Comida (unos 2 a 4 centavos de dólar por ticket).
-- **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa
-  más alimentos), con el mes en que se llega guardando lo que sobra.
+- **Alimentos** y **Gastos**, en dos tarjetas: alimentos tiene su presupuesto
+  (600.000 si no se cambia) y cuánto queda por semana para lo que falta; gastos
+  es lo que no es comida ni está en la casa (salidas, transporte, suscripciones,
+  regalos, gustos) y arranca sin presupuesto, para medir primero. Cada gasto
+  lleva una **categoría** (súper, verdulería y carnicería, delivery, kiosco,
+  salidas, transporte, suscripciones, familia y regalos, gustos personales,
+  casa, salud, otros) y de ahí sale en qué tarjeta va; los viejos, sin
+  categoría, son alimentos. Se carga **a mano** o con **la foto del ticket o
+  del comprobante** (también los de Mercado Pago): Claude Opus 5.5 lee el
+  comercio, la fecha, la categoría, cada renglón (los descuentos en negativo) y
+  el total, y antes de guardar se corrige. Se guarda todo menos la foto. Un
+  ticket largo va en hasta 4 fotos, a 2048 px para que se lea la letra chica,
+  con la misma clave de Anthropic que Comida (unos 2 a 4 centavos de dólar por
+  ticket). *Ya está en un gasto de la casa* marca lo que ya se cuenta en Casa
+  (una suscripción, los gastos de Tizi): se ve en la lista y en el análisis,
+  pero no se suma de nuevo al mes ni al presupuesto.
+- **Dónde se va la plata**: por semana (de lunes a domingo) o por mes, el total
+  dividido en alimentos y gastos, cada categoría de mayor a menor con su
+  porcentaje y lo del período anterior, los **gastos hormiga** (los de menos de
+  $ 20.000: cuántos y cuánto suman) y los comercios donde más se gastó. Es la
+  base para el análisis de cada sábado y para comparar mes a mes.
+- **Colchón**: lo ahorrado y los hitos de 1, 3 y 6 meses de gastos (la casa,
+  alimentos y el presupuesto de gastos), con el mes en que se llega guardando
+  lo que sobra.
 - **Deudas**: lo que se debe, la tasa, la cuota y cuándo termina cada una, con
   la más cara arriba; el total y cuánto se va por mes en intereses (más IVA).
   Una deuda puede tener cuotas distintas algunos meses (`plan`): la primera de
@@ -284,7 +299,8 @@ viajan en el respaldo, como el resto; nunca van al repo.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
 - **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
 - **Finanzas** — el mes con lo que sobra o falta, los vencimientos para marcar,
-  alimentos contra el presupuesto (a mano o con la foto del ticket), colchón y deudas.
+  alimentos y gastos por separado (a mano o con la foto del ticket), dónde se va
+  la plata, colchón y deudas.
 - **Más** — hábitos (alta, edición, orden; los que tienen meta de series o minutos
   pueden pasar a sí o no y volver), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
@@ -303,7 +319,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                403 pruebas automatizadas (Playwright)
+├── test.mjs                424 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
