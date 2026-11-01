@@ -209,7 +209,25 @@ analizar la primera foto.
 La pestaña **Finanzas** lleva la plata del mes con la misma idea que los
 hábitos: cargás lo que pasa y la app hace las cuentas.
 
-- **El mes** (arriba, con ‹ › para ver otros): lo que entra, la casa, alimentos
+- **Tu plata hoy** (la caja, arriba de todo): la plata de verdad, sin
+  presupuestos ni supuestos. Cargás lo que tenés en cada cuenta (Mercado Pago,
+  Nubi, efectivo…) y abajo están, día por día, lo que falta cobrar y pagar en el
+  mes (ingresos en su día de cobro, cuotas y gastos de la casa en su día de pago,
+  lo de una sola vez y lo sin fecha al final) con **cuánto te queda después de
+  cada cosa**. Avisa el primer día que no alcanza. Arriba, lo **libre hasta fin de
+  mes** para comida y gastos (y por semana), o cuánto falta. Con ✓ se marca
+  cobrado o pagado: cuánto de verdad, cuándo y de qué cuenta (o que no pasó por
+  tus cuentas, como un descuento del sueldo o un saldo a favor), y suma o resta de
+  esa cuenta; tocándolo de nuevo se deshace. Los gastos de débito o efectivo
+  restan de la cuenta elegida al cargarlos; los de tarjeta, cuando se paga el
+  resumen. Un sueldo que se cobra desde el 20 es plata del mes siguiente: lo
+  cobrado antes de cargar las cuentas ya está en los saldos, y el del fin de este
+  mes aparece aparte y queda reservado. *Ajustar los saldos* con lo que dice el
+  banco deja la diferencia como lo que se fue (o entró) **sin anotar**: así la
+  conciliación sale sola. Hoy también muestra tu plata, lo libre y el día que no
+  alcanza.
+
+- **El plan del mes** (con ‹ › para ver otros): lo que entra, la casa, alimentos
   y cuotas, y cuánto **sobra o falta**. Lo que pasa una sola vez (un adelanto
   de sueldo, su descuento, un saldo a favor de la tarjeta) se carga como *algo
   de este mes*. Un sueldo cuenta para el mes que paga: el que se cobra el 30 de
@@ -283,8 +301,8 @@ anotado, el cierre de fin de mes y las estadísticas, porque lo que no se mide
 no se puede mejorar. Arriba, ‹ › para ver otros meses.
 
 - **El mes**: lo gastado contra el presupuesto, cuánto queda, cuánto se puede
-  gastar por semana en lo que falta, **cuánto podés gastar hoy** y, desde el
-  tercer día, a dónde llega a este ritmo. Dividido en **necesario** y
+  gastar por semana en lo que falta, lo libre de verdad según tu caja y, desde
+  el tercer día, a dónde llega a este ritmo. Dividido en **necesario** y
   **gustos**, en pesos y en porcentaje.
 - **Cargar un gasto**: **a mano** o con **la foto del ticket o del
   comprobante** (también los de Mercado Pago): Claude Opus 5.5 lee el comercio,
@@ -345,8 +363,8 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
   disciplina mezclado al azar, sin repetir hasta pasar por todas (la maldición
   de la disciplina, quedarse quieto duele más que avanzar, "la calidad no es un
   acto, es un hábito"…); tocándola se ven todas y cuántas veces marcaste verde
-  desde que empezaste. **Hoy podés gastar**: lo que queda del presupuesto del
-  mes repartido en los días que faltan, y cuánto llevás hoy. Nota del día.
+  desde que empezaste. **Tu plata hoy**: lo que tenés, lo libre hasta fin de
+  mes y el día que no alcanza. Nota del día.
 - **Mes** — la rueda de 31 días: un anillo por hábito del centro hacia afuera, un
   sector por día, el día de hoy con contorno, Prime % en el centro. Las celdas se
   tocan para cambiarlas.
@@ -357,8 +375,8 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
 - **Gastos** — la administración de los gastos: presupuesto por categoría,
   necesidad o gusto, con qué pagaste, los movimientos, dónde se va la plata, el
   cierre del mes y cómo vamos en gráficos y estadísticas.
-- **Finanzas** — el mes con lo que sobra o falta, los vencimientos para marcar,
-  a dónde vas, colchón y deudas.
+- **Finanzas** — tu plata hoy y lo que falta cobrar y pagar día por día; el plan
+  del mes con lo que sobra o falta, indicadores, a dónde vas, colchón y deudas.
 - **Más** — hábitos (alta, edición, orden; los que tienen meta de series o minutos
   pueden pasar a sí o no y volver), listas *Hacer menos* y *Hacer más*,
   tabla historial del mes, ajustes y respaldo.
@@ -377,7 +395,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                488 pruebas automatizadas (Playwright)
+├── test.mjs                518 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
