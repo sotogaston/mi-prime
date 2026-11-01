@@ -1925,22 +1925,13 @@ console.log('\n== 43. Gastos y Finanzas conectados: tarjeta, conciliación, indi
   ok('deuda nueva: préstamos con fecha de alta, adelantos marcados como deuda y compras en cuotas del mes',
     L.deudaNuevaDelMes({ deudas: [{ saldo: 400000, alta: '2026-11-10' }, { saldo: 9, alta: '2026-10-01' }], movimientos: [{ mes: '2026-11', monto: 300000, deuda: true }, { mes: '2026-11', monto: 5 }],
       gastos: G }, '2026-11') === 800000);
-  const dh = L.disponibleHoy({ ...finanzas(), gastos: { '2026-11-02': [{ comercio: 'x', total: 50000 }], '2026-11-04': [{ comercio: 'y', total: 10000 }, { comercio: 'z', total: 5000, deCasa: true }] } }, '2026-11-04');
-  ok('hoy podés gastar: lo que queda (350 mil) en 27 días, de a 100: 12.900; llevás 10 mil y te quedan 2.900',
-    dh.queda === 350000 && dh.dias === 27 && dh.porDia === 12900 && dh.deHoy === 10000 && dh.resto === 2900);
-  ok('antes del plan o sin presupuesto, no hay', L.disponibleHoy(finanzas(), '2026-10-20') === null
-    && L.disponibleHoy({ ...finanzas(), presupuestos: {} }, '2026-11-04') === null);
-
   const st43 = { ...estado({ lastClosed: '2026-11-03' }), finanzas: { ...finanzas(), gastos: {
     '2026-11-02': [{ id: 'g1', comercio: 'Coto', total: 50000, categoria: 'super', medio: 'debito' }],
     '2026-11-04': [{ id: 'g2', comercio: 'Kiosco', total: 10000, categoria: 'kiosco', medio: 'debito' }] } } };
   const { p, c, errs } = await abrirEn('2026-11-04', st43);
   const S = () => p.evaluate(() => window.__prime.S);
-  ok('Hoy dice cuánto podés gastar hoy y cuánto llevás', /Hoy podés gastar \$ 12\.900: llevás \$ 10\.000, te quedan \$ 2\.900\./.test(await p.locator('.hoy-gasto').innerText())
-    && /queda del presupuesto del mes \(\$ 350\.000\) repartido en los 27 días que faltan/.test(await p.locator('.hoy-gasto').innerText()));
-  await p.locator('.hoy-gasto').click(); await p.waitForTimeout(150);
-  ok('y lleva a Gastos, que también lo dice arriba', await p.locator('nav button[data-tab="gastos"]').getAttribute('aria-current') === 'true'
-    && /Hoy podés gastar \$ 12\.900/.test(await p.locator('.gastos-mes').innerText()));
+  ok('sin cuentas, Hoy no muestra la caja', await p.locator('.caja-hoy').count() === 0);
+  await ir(p, 'gastos');
   // Una compra en cuotas
   await p.locator('.cargar [data-act="fmano"]').click();
   ok('las cuotas aparecen solo con "en cuotas"', !(await p.locator('.sheet .en-cuotas').isVisible()));
@@ -1952,7 +1943,7 @@ console.log('\n== 43. Gastos y Finanzas conectados: tarjeta, conciliación, indi
   await p.locator('#gCuotas').fill('3'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   const aur = (await S()).finanzas.gastos['2026-11-04'][1];
   ok('se guarda en 3 cuotas y se ve así', aur?.medio === 'cuotas' && aur.cuotas === 3 && /Auriculares\s+Gustos personales · en 3 cuotas/.test(await p.locator('.diario').innerText())
-    && /llevás \$ 70\.000, te pasaste \$ 57\.100/.test(await p.locator('.gastos-mes').innerText()));
+    && !/Con tu plata real/.test(await p.locator('.gastos-mes').innerText()));
   await p.locator('.diario .fila', { hasText: 'Auriculares' }).locator('.ce').click();
   ok('al editarla se ven las cuotas', await p.locator('#eCuotas').inputValue() === '3' && await p.locator('.sheet .en-cuotas').isVisible());
   await p.locator('#eMedio').selectOption('tarjeta'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
@@ -2021,7 +2012,131 @@ console.log('\n== 43. Gastos y Finanzas conectados: tarjeta, conciliación, indi
   await c.close();
 }
 
-console.log('\n== 44. Capturas ==');
+console.log('\n== 44. La caja: la plata de verdad, día por día ==');
+{
+  const L = cargarLogica(estado());
+  const cuentas = [{ id: 'mp', nombre: 'Mercado Pago', saldo: 800000, fecha: '2026-11-01', n: 1 }, { id: 'ef', nombre: 'Efectivo', saldo: 50000, fecha: '2026-11-01', n: 2 }];
+  const F = { ...finanzas(), cuentas, hechos: {}, ajustes: [], sello: 2, gastos: {} };
+  ok('el día de cobro: el sueldo del 30 es plata del mes siguiente; el del 4, del mismo mes',
+    L.fechaCobro({ dia: 30 }, '2026-11') === '2026-10-30' && L.fechaCobro({ dia: 4 }, '2026-11') === '2026-11-04'
+    && L.fechaCobro({ dia: 31 }, '2026-12') === '2026-11-30' && L.fechaCobro({}, '2026-11') === null);
+  let c = L.cajaDelMes(F, '2026-11-04');
+  ok('la caja: tu plata hoy, lo que falta pagar por fecha con lo que queda después de cada cosa, y lo sin fecha al final',
+    c.total === 850000 && c.pendientes.map(e => `${e.fecha || '-'} ${e.nombre} ${e.queda}`).join(' | ')
+      === '2026-11-05 Alquiler 150000 | 2026-11-10 Préstamo caro -100000 | 2026-11-25 Tarjeta en cuotas -300000 | 2026-11-30 Billetera -400000 | - Colegio -500000 | - Descuento del adelanto -800000');
+  ok('el primer día que no alcanza, lo libre hasta fin de mes y lo que falta cobrar y pagar',
+    c.faltaEl.fecha === '2026-11-10' && c.faltaEl.nombre === 'Préstamo caro' && c.faltaEl.falta === 100000 && c.libre === -800000
+    && c.cobrar === 0 && c.pagar === 1650000 && c.dias === 27 && c.porSemana === 0);
+  ok('el sueldo del 30 de octubre ya estaba en los saldos; el del 30 de noviembre es para diciembre',
+    c.hechos.some(e => e.clave === 'i:i1' && e.hecho.implicito) && c.proximos.length === 1 && c.proximos[0].mes === '2026-12' && c.proximos[0].fecha === '2026-11-30');
+  const F2 = { ...F, sello: 6, gastos: { '2026-11-03': [{ comercio: 'a', total: 10000, medio: 'debito', cuenta: 'ef', n: 3 }, { comercio: 'b', total: 5000, cuenta: 'ef' },
+      { comercio: 'c', total: 7000, medio: 'tarjeta', cuenta: 'ef', n: 4 }, { comercio: 'd', total: 3000, cuenta: 'ef', n: 5, deCasa: true }],
+      '2026-10-31': [{ comercio: 'e', total: 1000, cuenta: 'ef', n: 6 }] },
+    hechos: { '2026-11': { 'f:f1': { monto: -700000, cuenta: 'mp', fecha: '2026-11-05', n: 6 } }, '2026-12': { 'i:i1': { monto: 2000000, cuenta: 'mp', fecha: '2026-11-30', n: 7 } } } };
+  c = L.cajaDelMes(F2, '2026-11-30');
+  ok('los gastos de débito o efectivo restan de su cuenta; los de antes del saldo, de tarjeta o de la casa, no',
+    L.saldoCuenta(F2, cuentas[1]) === 40000 && L.saldoCuenta(F2, cuentas[0]) === 2100000);
+  ok('lo cobrado para el mes que viene queda reservado: no es libre', c.total === 2140000 && c.reservado === 2000000
+    && c.libre === 2140000 - 2000000 - 950000 && !c.proximos.some(e => !e.hecho));
+  const F3 = { ...F2, ajustes: [{ fecha: '2026-11-06', cuenta: 'mp', dif: -50000 }, { fecha: '2026-11-07', cuenta: 'ef', dif: 4000 }] }, k = L.conciliacionMes(F3, '2026-11');
+  ok('con cuentas, la conciliación sale sola de los ajustes: sin anotar 50 mil de 760 mil que salieron, el 7 %',
+    k.auto && k.pagado === 700000 && k.gastado === 10000 && k.sinAnotar === 50000 && k.entroSinAnotar === 4000 && k.salio === 760000 && k.pct === 7);
+
+  const { p, c: ctx, errs } = await abrirEn('2026-11-04', { ...estado({ lastClosed: '2026-11-03' }), finanzas: finanzas() });
+  const S = () => p.evaluate(() => window.__prime.S), caja = () => p.locator('.caja').innerText();
+  await ir(p, 'finanzas');
+  ok('sin cuentas, la caja invita a cargarlas y los vencimientos siguen abajo', /Cargá cuánta plata tenés hoy en cada cuenta/.test(await caja())
+    && await p.locator('.venc').count() === 1 && /El plan del mes, con presupuestos/i.test(await p.locator('#view').innerText()));
+  await p.locator('.caja [data-act="cajaSaldos"]').click();
+  ok('la hoja trae Mercado Pago y Efectivo para completar', await p.locator('.frow-c').count() === 3
+    && await p.locator('.frow-c').nth(0).locator('.cu-n').inputValue() === 'Mercado Pago' && await p.locator('.frow-c').nth(1).locator('.cu-n').inputValue() === 'Efectivo');
+  await p.locator('.frow-c').nth(0).locator('.cu-s').fill('800000'); await p.locator('.frow-c').nth(1).locator('.cu-s').fill('50000');
+  await p.locator('.frow-c').nth(2).locator('.cu-n').fill('Nubi');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('guardadas: tu plata hoy $ 850.000; la que no tiene saldo no se guarda', (await S()).finanzas.cuentas.length === 2
+    && /Tu plata hoy\s+\$ 850\.000\s+Mercado Pago \$ 800\.000 · Efectivo \$ 50\.000/i.test(await caja()));
+  ok('te faltan $ 800.000 para pagar todo lo del mes y el 10 no alcanza', /Te faltan \$ 800\.000\s+para pagar todo lo de noviembre, antes de comida y gastos: por cobrar \$ 0, por pagar \$ 1\.650\.000/.test(await caja())
+    && /El mar 10 nov no te alcanza para Préstamo caro: faltan \$ 100\.000\./.test(await caja()));
+  ok('día por día, con lo que queda; lo sin fecha aparte; el sueldo del 30 para diciembre aparte',
+    /5\/11\s+Alquiler\s+queda \$ 150\.000\s+− \$ 700\.000/.test(await caja()) && /Sin fecha: en algún momento de noviembre/i.test(await caja())
+    && /Entra este mes, pero es para diciembre/i.test(await caja()) && /30\/11\s+Sueldo/.test(await caja())
+    && await p.locator('.caja .no-alcanza').count() === 5 && await p.locator('.venc').count() === 0);
+  // Pagar el alquiler desde Mercado Pago
+  await p.locator('.caja [data-act="cajaHecho"][data-k="f:f1"]').click();
+  ok('el ✓ pregunta cuánto, cuándo y de qué cuenta', /Pagaste Alquiler/.test(await p.locator('.sheet h3').innerText())
+    && await p.locator('#hMonto').inputValue() === '700000' && await p.locator('#hCuenta').inputValue() === (await S()).finanzas.cuentas[0].id);
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  let Fs = (await S()).finanzas;
+  ok('pagado: Mercado Pago baja a $ 100.000, queda marcado en los vencimientos y lo libre no cambia', /Tu plata hoy\s+\$ 150\.000\s+Mercado Pago \$ 100\.000/i.test(await caja())
+    && Fs.pagos['2026-11'].includes('f:f1') && Fs.hechos['2026-11']['f:f1'].monto === -700000 && /Te faltan \$ 800\.000/.test(await caja())
+    && /Ya cobrado y pagado \(2\)/.test(await caja()));
+  await p.locator('.caja .hechos summary').click();
+  await p.locator('.caja .hechos [data-k="f:f1"]').click();
+  ok('tocándolo, el detalle', /Salió \$ 700\.000 el mié 4 nov · Mercado Pago\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="d"]').click(); await p.waitForTimeout(150);
+  Fs = (await S()).finanzas;
+  ok('deshacer lo devuelve a la cuenta y a lo pendiente', /Tu plata hoy\s+\$ 850\.000/i.test(await caja()) && !Fs.pagos['2026-11'] && !Fs.hechos['2026-11']);
+  await p.locator('.caja [data-act="cajaHecho"][data-k="f:f1"]').click(); await p.locator('#hMonto').fill('650000');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('si pagaste otro monto, resta lo que pagaste', /Tu plata hoy\s+\$ 200\.000/i.test(await caja()) && /Te faltan \$ 750\.000/.test(await caja()));
+  // Un gasto en efectivo
+  await ir(p, 'gastos');
+  await p.locator('.cargar [data-act="fmano"]').click();
+  ok('el gasto pregunta de qué cuenta salió', await p.locator('#gCuenta').isVisible() && await p.locator('#gCuenta option').count() === 3);
+  await p.locator('#gMedio').selectOption('tarjeta');
+  ok('con tarjeta no pregunta la cuenta', !(await p.locator('.sheet .de-cuenta').isVisible()));
+  await p.locator('#gMedio').selectOption('debito');
+  await p.locator('#gNombre').fill('Verdulería'); await p.locator('#gTotal').fill('10000'); await p.locator('#gCuenta').selectOption({ label: 'Efectivo' });
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('el gasto resta del efectivo y Gastos lo dice con tu plata real', (await S()).finanzas.gastos['2026-11-04'][0].cuenta === (await S()).finanzas.cuentas[1].id
+    && /Con tu plata real, te faltan \$ 760\.000/.test(await p.locator('.gastos-mes').innerText()));
+  await ir(p, 'hoy');
+  ok('Hoy muestra tu plata, lo que falta y el día que no alcanza', /Tu plata hoy · \$ 190\.000/i.test(await p.locator('.caja-hoy').innerText())
+    && /te faltan \$ 760\.000/.test(await p.locator('.caja-hoy').innerText()) && /El mar 10 nov no te alcanza/.test(await p.locator('.caja-hoy').innerText()));
+  await p.locator('.caja-hoy').click(); await p.waitForTimeout(150);
+  ok('y lleva a Finanzas', await p.locator('nav button[data-tab="finanzas"]').getAttribute('aria-current') === 'true');
+  // El sueldo del 30 de octubre: si no llegó, queda por cobrar
+  await p.locator('.caja .hechos summary').click();
+  await p.locator('.caja .hechos [data-m="2026-11"][data-k="i:i1"]').click();
+  ok('lo cobrado antes de cargar las cuentas ya estaba en los saldos', /Ya estaba en tus saldos cuando cargaste las cuentas\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="d"]').click(); await p.waitForTimeout(150);
+  ok('"No lo cobré" lo deja por cobrar', /Sueldo\s+¿llegó\? · queda \$ 2\.190\.000\s+\+ \$ 2\.000\.000/.test(await caja()) && /\$ 1\.240\.000\s+libres hasta fin de mes/.test(await caja()));
+  await p.locator('.caja [data-act="cajaHecho"][data-m="2026-11"][data-k="i:i1"]').click();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('cobrado: suma a Mercado Pago', /Tu plata hoy\s+\$ 2\.190\.000/i.test(await caja()) && /\$ 1\.240\.000\s+libres hasta fin de mes/.test(await caja()));
+  // Lo del mes que viene que se cobra en este
+  await p.locator('.caja [data-act="cajaHecho"][data-m="2026-12"][data-k="i:i1"]').click();
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('el sueldo de diciembre cobrado el 30 queda reservado: lo libre no cambia', /Tu plata hoy\s+\$ 4\.190\.000/i.test(await caja())
+    && /De eso, \$ 2\.000\.000 ya son para diciembre/.test(await caja()) && /\$ 1\.240\.000\s+libres hasta fin de mes/.test(await caja()));
+  // Ajustar con lo que dice el banco
+  await p.locator('.caja [data-act="cajaSaldos"]').click();
+  ok('ajustar muestra lo que calcula la app', await p.locator('.frow-c').nth(0).locator('.cu-s').inputValue() === '4150000');
+  await p.locator('.frow-c').nth(0).locator('.cu-s').fill('4130000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  Fs = (await S()).finanzas;
+  ok('la diferencia queda como sin anotar', Fs.ajustes.length === 1 && Fs.ajustes[0].dif === -20000 && /Tu plata hoy\s+\$ 4\.170\.000/i.test(await caja()));
+  await ir(p, 'gastos');
+  ok('y la conciliación del cierre sale sola', /Sin anotar: \$ 20\.000, el 3 % de lo que salió, en 1 ajuste\. Meta: menos de 10 %\.\s+✓ En meta\./.test(await p.locator('.cierre').innerText()));
+  await ir(p, 'finanzas');
+  ok('igual que el indicador', /Sin anotar[\s\S]*?3 %\s+✓ en meta/.test(await p.locator('.indicadores').innerText()));
+  // Otro mes: los vencimientos siguen, y el ✓ pasa por la caja
+  await p.locator('[data-act="fmes"][data-n="1"]').click(); await p.waitForTimeout(100);
+  await p.locator('.venc [data-act="fpagar"][data-k="f:f1"]').click();
+  ok('en otro mes, el ✓ de vencimientos también pregunta la cuenta', /Pagaste Alquiler/.test(await p.locator('.sheet h3').innerText()));
+  await p.locator('.sheet [data-x="c"]').click();
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [], con = f => ({ ...base, finanzas: { ...base.finanzas, ...f } });
+    for (const f of [{}, { cuentas: [{ id: 'a', nombre: 'x', saldo: 'mucho', fecha: '2026-11-01', n: 1 }] }, { hechos: { '2026-11': { 'f:f1': { monto: 'x', cuenta: '', fecha: '2026-11-01', n: 1 } } } },
+                     { ajustes: [{ fecha: 'hoy', cuenta: 'a', dif: 1 }] }, { pendientes: { '2026-11': [1] } }, { sello: -1 }, { gastos: { '2026-11-01': [{ comercio: 'x', total: 1, cuenta: 5 }] } }])
+      try { P.prepararRespaldo(JSON.stringify(con(f))); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae la caja y rechaza la rota (' + resp + ')', resp === 'ok,no,no,no,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await ctx.close();
+}
+
+console.log('\n== 45. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
