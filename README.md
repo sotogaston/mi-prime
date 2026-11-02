@@ -221,11 +221,14 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   esa cuenta; tocándolo de nuevo se deshace. Los gastos de débito o efectivo
   restan de la cuenta elegida al cargarlos; los de tarjeta, cuando se paga el
   resumen. Un sueldo que se cobra desde el 20 es plata del mes siguiente: lo
-  cobrado antes de cargar las cuentas ya está en los saldos, y el del fin de este
-  mes aparece aparte y queda reservado. *Ajustar los saldos* con lo que dice el
-  banco deja la diferencia como lo que se fue (o entró) **sin anotar**: así la
-  conciliación sale sola. Hoy también muestra tu plata, lo libre y el día que no
-  alcanza.
+  cobrado antes de cargar las cuentas ya está en los saldos (y la caja lo dice:
+  *Ya está en estos saldos: Crowdar, cobrado el 30/10*); el del fin de este mes
+  aparece aparte recién en los últimos días y, marcado, queda reservado para el
+  mes que viene (tocando la reserva se deshace). *Ajustar los saldos* con lo que
+  dice el banco deja la diferencia como lo que se fue (o entró) **sin anotar**:
+  así la conciliación sale sola; *Empezar la caja de nuevo* toma los saldos de
+  hoy como punto de partida y borra lo marcado y los ajustes. Hoy también
+  muestra tu plata, lo libre y el día que no alcanza.
 
 - **El plan del mes** (con ‹ › para ver otros): lo que entra, la casa, alimentos
   y cuotas, y cuánto **sobra o falta**. Lo que pasa una sola vez (un adelanto
@@ -294,6 +297,13 @@ viajan en el respaldo, como el resto; nunca van al repo.
 ---
 
 ## Gastos: la administración de los gastos del mes
+
+El mes de la plata va **de cobro a cobro**: si el sueldo de fin de mes se cobra
+el 30 de octubre y es plata de noviembre, lo que se gasta desde ese día también
+es de noviembre (del 30/10 al 29/11). Así se cuentan los gastos, el presupuesto,
+el ritmo, las estadísticas, el cierre y el plan. Sin sueldos de fin de mes, es
+el mes del calendario. Si el cobro se marca en la caja un par de días antes o
+después, el mes arranca ese día.
 
 La pestaña **Gastos** es el control de lo que se gasta día a día, con una
 mirada de libro contable: un presupuesto por categoría, cada movimiento
@@ -395,7 +405,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                518 pruebas automatizadas (Playwright)
+├── test.mjs                528 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
