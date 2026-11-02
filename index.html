@@ -304,6 +304,9 @@ details summary{cursor:pointer;font-size:13px;color:var(--ink-2);padding:2px 0}
 .hormiga{margin:12px 0 0;font-size:14px;line-height:1.5}
 .cat-s.warn{color:var(--fail);font-weight:700}
 .sec{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:22px 4px 10px}
+.mnav b small.rango{display:block;font-size:11.5px;font-weight:500;color:var(--muted);text-transform:none;text-align:center}
+.mnav b{text-align:center}
+.caja .reservado{display:block;text-align:left;margin-top:6px;font-size:13px;color:var(--ink-2)}
 .caja .libre{margin:14px 0 4px;padding:12px 14px;border-radius:14px;background:var(--surface-2);font-size:15px}
 .caja .libre b{font-size:20px;letter-spacing:-.01em}
 .caja .libre small{display:block;color:var(--ink-2);font-size:13px;margin-top:3px;line-height:1.4}
@@ -1324,14 +1327,33 @@ const MEDIOS_PAGO = { debito: "Débito, efectivo o transferencia", tarjeta: "Tar
 function rubroDe(g){ return CATEGORIAS_GASTO[g?.categoria]?.rubro || "alimentos"; }
 function tipoDeGasto(g){ return CATEGORIAS_GASTO[g?.categoria]?.tipo || "necesario"; }
 function nombreCategoria(c){ return CATEGORIAS_GASTO[c]?.nombre || "Sin categoría"; }
-/* Los gastos del mes en orden de fecha, con su día y su lugar en la lista de ese
-   día; con rubro, solo los de ese rubro */
-function gastosDelMes(gastos, mes, rubro){
-  return Object.keys(gastos || {}).filter(d => mesDe(d) === mes).sort()
+/* ---- el mes de la plata: de cobro a cobro ----
+   El sueldo que se cobra a fin de mes es plata del mes siguiente (el del 30 de
+   octubre es de noviembre), así que lo que se gasta desde ese día también es de ese
+   mes: noviembre va del 30 de octubre al 29 de noviembre. Arranca el día de cobro
+   del primero de esos sueldos (el día que se marcó cobrado, si cae cerca, o el del
+   plan); sin sueldos de fin de mes, es el mes del calendario. */
+function inicioMes(F, mes){
+  let ini = fechaDelMes(mes, 1);
+  for(const i of F?.ingresos || []){
+    if(!(i.dia >= 20) || !ingresoDelMes(i, mes)) continue;
+    const plan = fechaCobro(i, mes), real = F?.hechos?.[mes]?.["i:" + i.id]?.fecha;
+    const f = real && Math.abs(parseISO(real) - parseISO(plan)) <= 6 * 864e5 ? real : plan;
+    if(f < ini) ini = f;
+  }
+  return ini;
+}
+function rangoMes(F, mes){ return { desde: inicioMes(F, mes), hasta: iso(addDays(parseISO(inicioMes(F, sumarMeses(mes, 1))), -1)) }; }
+function mesDeLaPlata(F, fecha){ const sig = sumarMeses(mesDe(fecha), 1); return fecha >= inicioMes(F, sig) ? sig : mesDe(fecha); }
+/* Los gastos del mes de la plata en orden de fecha, con su día y su lugar en la
+   lista de ese día; con rubro, solo los de ese rubro */
+function gastosDelMes(F, mes, rubro){
+  const { desde, hasta } = rangoMes(F, mes), gastos = F?.gastos || {};
+  return Object.keys(gastos).filter(d => d >= desde && d <= hasta).sort()
     .flatMap(d => gastos[d].map((g, i) => ({ g, fecha: d, i }))).filter(x => !rubro || rubroDe(x.g) === rubro);
 }
 /* Lo gastado en el mes en un rubro, sin lo que ya está en la casa */
-function gastadoEnMes(gastos, mes, rubro = "alimentos"){ return suma(gastosDelMes(gastos, mes, rubro).filter(x => !x.g.deCasa), x => x.g.total); }
+function gastadoEnMes(F, mes, rubro = "alimentos"){ return suma(gastosDelMes(F, mes, rubro).filter(x => !x.g.deCasa), x => x.g.total); }
 function presupuestoGastos(F){ return presupuestoRubro(F, "gastos"); }
 function gastoMensual(F){ return suma(F?.fijos, f => f.monto) + presupuestoAlimentos(F) + presupuestoGastos(F); }
 function totalColchon(F){ return suma(F?.colchon, c => c.monto); }
@@ -1344,10 +1366,10 @@ function totalColchon(F){ return suma(F?.colchon, c => c.monto); }
 function resumenMes(F, mes, hoy){
   const ingresos = (F?.ingresos || []).map(i => ({ nombre: i.nombre, monto: ingresoDelMes(i, mes) })).filter(i => i.monto);
   const movimientos = (F?.movimientos || []).filter(m => m.mes === mes);
-  const presupuesto = presupuestoAlimentos(F), gastado = gastadoEnMes(F?.gastos, mes, "alimentos");
-  const presupuestoG = presupuestoGastos(F), gastadoG = gastadoEnMes(F?.gastos, mes, "gastos");
-  const casa = suma(F?.fijos, f => f.monto), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes)), pasado = mes < mesDe(hoy);
-  const caja = rubro => suma(gastosDelMes(F?.gastos, mes, rubro).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
+  const presupuesto = presupuestoAlimentos(F), gastado = gastadoEnMes(F, mes, "alimentos");
+  const presupuestoG = presupuestoGastos(F), gastadoG = gastadoEnMes(F, mes, "gastos");
+  const casa = suma(F?.fijos, f => f.monto), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes)), pasado = mes < mesDeLaPlata(F, hoy);
+  const caja = rubro => suma(gastosDelMes(F, mes, rubro).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
   const alimentos = caja("alimentos") + (pasado ? 0 : Math.max(0, presupuesto - gastado));
   const gastos = caja("gastos") + (pasado ? 0 : Math.max(0, presupuestoG - gastadoG));
   const tarjeta = tarjetaDelMes(F, mes), deTarjeta = tarjeta.enResumen ? 0 : tarjeta.total;
@@ -1411,10 +1433,10 @@ function planAvisoVencimientos(F, ahora, dias, hora){
 }
 
 /* Lo que queda del presupuesto de alimentos, repartido en lo que falta del mes (hoy incluido) */
-function ritmoAlimentos(presupuesto, gastado, mes, hoy){
+function ritmoAlimentos(F, presupuesto, gastado, mes, hoy){
   const quedan = presupuesto - gastado;
-  if(mes !== mesDe(hoy)) return { quedan, dias: 0, porSemana: 0 };
-  const [y, m] = mes.split("-").map(Number), dias = daysInMonth(y, m - 1) - parseISO(hoy).getDate() + 1;
+  if(mes !== mesDeLaPlata(F, hoy)) return { quedan, dias: 0, porSemana: 0 };
+  const dias = diasEntre(hoy, rangoMes(F, mes).hasta) + 1;
   return { quedan, dias, porSemana: quedan > 0 ? Math.round(quedan / dias * 7 / 100) * 100 : 0 };
 }
 /* Cuotas que faltan desde `mes` hasta la última, las dos incluidas */
@@ -1473,7 +1495,7 @@ function analisisGastos(gastos, desde, hasta){
 /* Cada categoría con presupuesto o con algo gastado en el mes (sin lo que ya está en
    la casa); lo que no tiene categoría va aparte, con la clave "" */
 function sobresDelMes(F, mes){
-  const l = gastosDelMes(F?.gastos, mes).filter(x => !x.g.deCasa);
+  const l = gastosDelMes(F, mes).filter(x => !x.g.deCasa);
   const gastado = k => suma(l.filter(x => (CATEGORIAS_GASTO[x.g.categoria] ? x.g.categoria : "") === k), x => x.g.total);
   return [...Object.entries(CATEGORIAS_GASTO).map(([k, c]) => ({ categoria: k, ...c, presupuesto: F?.presupuestos?.[k] || 0, gastado: gastado(k) })),
           { categoria: "", rubro: "alimentos", tipo: "necesario", nombre: "Sin categoría", presupuesto: 0, gastado: gastado("") }]
@@ -1483,15 +1505,15 @@ function sobresDelMes(F, mes){
    día y el día de la semana de más gasto, necesidad o gusto, con qué se pagó, los
    hormiga, el acumulado día por día (null en los que no pasaron) y, en el mes en
    curso desde el tercer día, a dónde llega a este ritmo */
-function estadisticasGastos(gastos, mes, hoy){
-  const [y, m] = mes.split("-").map(Number), dim = daysInMonth(y, m - 1);
-  const l = gastosDelMes(gastos, mes).filter(x => !x.g.deCasa), total = suma(l, x => x.g.total);
-  const corrido = mes < mesDe(hoy) ? dim : mes > mesDe(hoy) ? 0 : parseISO(hoy).getDate();
+function estadisticasGastos(F, mes, hoy){
+  const { desde, hasta } = rangoMes(F, mes), dim = diasEntre(desde, hasta) + 1, actual = mesDeLaPlata(F, hoy);
+  const l = gastosDelMes(F, mes).filter(x => !x.g.deCasa), total = suma(l, x => x.g.total);
+  const corrido = mes < actual ? dim : mes > actual ? 0 : diasEntre(desde, hoy) + 1;
   const porFecha = {}, porDiaSemana = Array(7).fill(0);
   for(const x of l){ porFecha[x.fecha] = (porFecha[x.fecha] || 0) + x.g.total; porDiaSemana[parseISO(x.fecha).getDay()] += x.g.total; }
   let acum = 0;
   const serie = Array.from({ length: dim }, (_, i) => {
-    const ds = fechaDelMes(mes, i + 1);
+    const ds = iso(addDays(parseISO(desde), i));
     acum += porFecha[ds] || 0;
     return { fecha: ds, gastado: porFecha[ds] || 0, acumulado: i < corrido ? acum : null };
   });
@@ -1501,13 +1523,13 @@ function estadisticasGastos(gastos, mes, hoy){
            necesario: por(g => tipoDeGasto(g) === "necesario"), gustos: por(g => tipoDeGasto(g) === "gusto"),
            medios: Object.fromEntries([...Object.keys(MEDIOS_PAGO), ""].map(k => [k, por(g => (MEDIOS_PAGO[g.medio] ? g.medio : "") === k)])),
            hormiga: por(g => g.total < HORMIGA), serie,
-           proyeccion: mes === mesDe(hoy) && corrido >= 3 ? Math.round(total / corrido * dim) : null };
+           proyeccion: mes === actual && corrido >= 3 ? Math.round(total / corrido * dim) : null };
 }
 /* Lo gastado en cada uno de los n meses que terminan en `hasta`, sin lo que ya está en la casa */
-function totalesPorMes(gastos, hasta, n){
+function totalesPorMes(F, hasta, n){
   return Array.from({ length: n }, (_, i) => {
     const mes = sumarMeses(hasta, i - n + 1);
-    return { mes, total: suma(gastosDelMes(gastos, mes).filter(x => !x.g.deCasa), x => x.g.total) };
+    return { mes, total: suma(gastosDelMes(F, mes).filter(x => !x.g.deCasa), x => x.g.total) };
   });
 }
 
@@ -1541,10 +1563,12 @@ function tarjetaDelMes(F, mes){
    la casa), es lo que se fue sin anotar. */
 function conciliacionMes(F, mes){
   if(F?.cuentas?.length){                        // con cuentas: sale sola de los ajustes de saldo
-    const aj = (F.ajustes || []).filter(a => mesDe(a.fecha) === mes);
+    const { desde, hasta } = rangoMes(F, mes), en = f => f >= desde && f <= hasta;
+    const aj = (F.ajustes || []).filter(a => en(a.fecha));
     const sinAnotar = suma(aj, a => Math.max(0, -a.dif)), entroSinAnotar = suma(aj, a => Math.max(0, a.dif));
-    const pagado = -suma(Object.values(F.hechos || {}).flatMap(h => Object.values(h)).filter(x => x.cuenta && x.monto < 0 && mesDe(x.fecha) === mes), x => x.monto);
-    const gastado = suma(gastosDelMes(F.gastos, mes).filter(x => x.g.cuenta && x.g.n != null && !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
+    const pagado = -suma(Object.values(F.hechos || {}).flatMap(h => Object.values(h)).filter(x => x.cuenta && x.monto < 0 && en(x.fecha)), x => x.monto);
+    const resto = x => { const c = F.cuentas.find(c => c.id === x.g.cuenta); return c && x.g.n != null && x.fecha >= c.fecha && !x.g.deCasa && !enTarjeta(x.g); };
+    const gastado = suma(gastosDelMes(F, mes).filter(resto), x => x.g.total);
     const salio = pagado + gastado + sinAnotar;
     return { auto: true, listo: aj.length > 0, ajustes: aj.length, pagado, gastado, anotado: pagado + gastado, salio, sinAnotar, entroSinAnotar,
              pct: aj.length && salio > 0 ? Math.round(100 * sinAnotar / salio) : null };
@@ -1553,7 +1577,7 @@ function conciliacionMes(F, mes){
   const plan = suma(F?.ingresos, i => ingresoDelMes(i, mes)) + suma((F?.movimientos || []).filter(m => m.mes === mes), m => m.monto);
   const entro = c.entro ?? plan, listo = c.inicio != null && c.fin != null;
   const pagado = suma(vencimientos(F, mes).filter(v => v.pagado), v => v.monto);
-  const gastado = suma(gastosDelMes(F?.gastos, mes).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
+  const gastado = suma(gastosDelMes(F, mes).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
   const salio = listo ? c.inicio + entro - c.fin : null, anotado = pagado + gastado, sinAnotar = listo ? salio - anotado : null;
   return { inicio: c.inicio ?? null, fin: c.fin ?? null, plan, entro, cambiado: c.entro != null, listo, pagado, gastado, anotado, salio, sinAnotar,
            pct: listo && salio > 0 ? Math.round(100 * sinAnotar / salio) : null };
@@ -1567,7 +1591,7 @@ function conciliacionMes(F, mes){
 function deudaNuevaDelMes(F, mes){
   return suma((F?.deudas || []).filter(d => d.alta && mesDe(d.alta) === mes), d => d.saldo)
     + suma((F?.movimientos || []).filter(m => m.deuda && m.mes === mes), m => Math.abs(m.monto))
-    + suma(gastosDelMes(F?.gastos, mes).filter(x => x.g.medio === "cuotas" && !x.g.deCasa), x => x.g.total);
+    + suma(gastosDelMes(F, mes).filter(x => x.g.medio === "cuotas" && !x.g.deCasa), x => x.g.total);
 }
 const INDICADORES = [
   { k: "cuotas", nombre: "Cuotas de deudas", que: "del ingreso", meta: "hasta 30 %", ok: v => v <= 30 },
@@ -1639,13 +1663,14 @@ function cajaDelMes(F, hoy){
   const cuentas = (F?.cuentas || []).map(c => ({ ...c, actual: saldoCuenta(F, c) })), total = suma(cuentas, c => c.actual);
   const clave = e => e.fecha || "9999", orden = (a, b) => clave(a) < clave(b) ? -1 : clave(a) > clave(b) ? 1 : b.monto - a.monto;
   const ev = eventosCaja(F, mes), pendientes = ev.filter(e => !e.hecho && !e.proximo).sort(orden);
-  const reservado = suma(ev.filter(e => e.proximo && e.hecho?.cuenta), e => e.hecho.monto);
+  const enSaldo = h => { const c = (F?.cuentas || []).find(c => c.id === h?.cuenta); return !!c && h.n > c.n; };
+  const reservado = suma(ev.filter(e => e.proximo && enSaldo(e.hecho)), e => e.hecho.monto);
   let queda = total - reservado, faltaEl = null;
   for(const e of pendientes){ queda += e.monto; e.queda = queda; if(queda < 0 && !faltaEl) faltaEl = { fecha: e.fecha, nombre: e.nombre, falta: -queda }; }
   const [y, m] = mes.split("-").map(Number), dim = daysInMonth(y, m - 1), dias = mes === mesDe(hoy) ? dim - parseISO(hoy).getDate() + 1 : dim;
   return { mes, cuentas, total, reservado, pendientes, faltaEl, libre: queda, dias, porSemana: queda > 0 ? Math.floor(queda / dias * 7 / 100) * 100 : 0,
            cobrar: suma(pendientes.filter(e => e.monto > 0), e => e.monto), pagar: -suma(pendientes.filter(e => e.monto < 0), e => e.monto),
-           proximos: ev.filter(e => e.proximo).sort(orden), hechos: ev.filter(e => e.hecho && !e.proximo).sort(orden) };
+           proximos: ev.filter(e => e.proximo).sort(orden), hechos: ev.filter(e => e.hecho).sort(orden) };
 }
 
 /* ---- hábitos de finanzas ----
@@ -1662,12 +1687,12 @@ const HABITOS_FINANZAS = {
   vencimientos: { nombre: "Vencimientos al día", que: "Verde si no hay ninguna cuota ni gasto vencido sin marcar como pagado." }
 };
 /* Lo que se puede haber gastado en alimentos hasta ese día: el presupuesto del
-   mes repartido por día, con una semana de margen para la compra grande */
-function topeRitmo(presupuesto, ds){
-  const d = parseISO(ds), dim = daysInMonth(d.getFullYear(), d.getMonth());
-  return Math.round(presupuesto * Math.min(1, (d.getDate() + 7) / dim));
+   mes de la plata repartido por día, con una semana de margen para la compra grande */
+function topeRitmo(F, presupuesto, ds){
+  const { desde, hasta } = rangoMes(F, mesDeLaPlata(F, ds));
+  return Math.round(presupuesto * Math.min(1, (diasEntre(desde, ds) + 1 + 7) / (diasEntre(desde, hasta) + 1)));
 }
-function gastadoHasta(gastos, ds){ return suma(gastosDelMes(gastos, mesDe(ds), "alimentos").filter(x => x.fecha <= ds && !x.g.deCasa), x => x.g.total); }
+function gastadoHasta(F, ds){ return suma(gastosDelMes(F, mesDeLaPlata(F, ds), "alimentos").filter(x => x.fecha <= ds && !x.g.deCasa), x => x.g.total); }
 function deudaNuevaEl(F, ds){
   return [...(F?.deudas || []), ...(F?.movimientos || []).filter(m => m.deuda)].some(x => x.alta === ds)
     || (F?.gastos?.[ds] || []).some(g => g.medio === "cuotas");   // comprar en cuotas también es deuda nueva
@@ -1682,7 +1707,7 @@ function vencidoSinPagar(F, hoy){
 function estadoFinanzas(F, regla, ds, hoy){
   if(regla === "anotar") return F?.gastos?.[ds]?.length ? ST.GREEN : null;
   if(regla === "sinDeuda") return deudaNuevaEl(F, ds) ? ST.YELLOW : ST.GREEN;
-  if(regla === "ritmo") return gastadoHasta(F?.gastos, ds) <= topeRitmo(presupuestoAlimentos(F), ds) ? ST.GREEN : ST.YELLOW;
+  if(regla === "ritmo") return gastadoHasta(F, ds) <= topeRitmo(F, presupuestoAlimentos(F), ds) ? ST.GREEN : ST.YELLOW;
   if(regla === "vencimientos") return ds !== hoy ? undefined : vencidoSinPagar(F, hoy) ? ST.YELLOW : ST.GREEN;
   return null;
 }
@@ -1742,7 +1767,7 @@ function rumboFinanzas(F, hoy){
     ultima: !sinFin && conFin.length ? conFin.map(d => d.hasta).sort().at(-1) : null,
     cuotas: { ahora: p[0].cuotas, mes: p[6].mes, despues: p[6].cuotas },
     hito: hitosColchon(F, mes, hoy).find(h => !h.ya) || null,
-    alimentos: mes === mesDe(hoy) ? { gastado: gastadoHasta(F?.gastos, hoy), presupuesto: presupuestoAlimentos(F), tope: topeRitmo(presupuestoAlimentos(F), hoy) } : null,
+    alimentos: mes === mesDeLaPlata(F, hoy) ? { gastado: gastadoHasta(F, hoy), presupuesto: presupuestoAlimentos(F), tope: topeRitmo(F, presupuestoAlimentos(F), hoy) } : null,
     vencimientos: { total: v.length, pagados: v.filter(x => x.pagado).length, falta: suma(v.filter(x => !x.pagado), x => x.monto) }
   };
 }
@@ -2622,10 +2647,15 @@ function cajaHTML(F){
       <b>${conSigno(e.monto)}</b><button class="pq" data-act="cajaHecho" data-m="${e.mes}" data-k="${e.clave}"
         aria-label="${e.monto > 0 ? "Cobrado" : "Pagado"}: ${esc(e.nombre)}">✓</button></div>`;
   };
-  const hechos = c.hechos, sinFecha = c.pendientes.filter(e => !e.fecha);
+  const hechos = c.hechos, sinFecha = c.pendientes.filter(e => !e.fecha), pronto = iso(addDays(parseISO(TODAY), 5));
+  const yaEnSaldos = c.hechos.filter(e => e.hecho.implicito && e.monto > 0 && !e.proximo);
+  const proximos = c.proximos.filter(e => !e.hecho && e.fecha <= pronto);
   return `<div class="card caja"><div class="card-t">Tu plata hoy</div>
     ${heroInner(aPesos(c.total), c.cuentas.map(x => `${esc(x.nombre)} ${aPesos(x.actual)}`).join(" · "))}
-    ${c.reservado ? `<p class="pie" style="margin-top:6px">De eso, ${aPesos(c.reservado)} ya son para ${sig}: no se cuentan como libres.</p>` : ""}
+    ${yaEnSaldos.length ? `<p class="pie ya-saldos" style="margin-top:6px">Ya está en estos saldos: ${yaEnSaldos.map(e => `${esc(e.nombre)} ${aPesos(e.monto)}${e.fecha
+      ? ` (cobrado el ${diaYMes(e.fecha)})` : ""}`).join(", ")}, plata de ${nombre}. No hace falta cargarlo.</p>` : ""}
+    ${c.reservado ? `<button class="linkbtn reservado" data-act="cajaHecho" data-m="${sumarMeses(c.mes, 1)}" data-k="${c.proximos.find(e => e.hecho)?.clave}">De eso, ${aPesos(c.reservado)}
+      ya son para ${sig} (marcado como cobrado): no se cuentan como libres. Tocá para ver o deshacer.</button>` : ""}
     <button class="linkbtn" data-act="cajaSaldos">Ajustar los saldos con lo que dice el banco</button>
     <div class="libre${c.libre < 0 ? " falta" : ""}">${c.libre >= 0
       ? `<b>${aPesos(c.libre)}</b> libres hasta fin de mes<small>para comida y gastos, después de cobrar y pagar todo lo de ${nombre} · unos ${aPesos(c.porSemana)} por semana</small>`
@@ -2635,10 +2665,10 @@ function cajaHTML(F){
     ${c.pendientes.filter(e => e.fecha).map(e => fila(e, true)).join("")}
     ${sinFecha.length ? `<p class="frec-t">Sin fecha: en algún momento de ${nombre}</p>${sinFecha.map(e => fila(e, true)).join("")}` : ""}
     ${c.pendientes.length ? "" : `<p style="margin:0;color:var(--muted);font-size:13.5px">Nada más por cobrar ni por pagar este mes.</p>`}
-    ${c.proximos.filter(e => !e.hecho).length ? `<p class="frec-t">Entra este mes, pero es para ${sig}</p>${c.proximos.filter(e => !e.hecho).map(e => fila(e, false)).join("")}` : ""}
+    ${proximos.length ? `<p class="frec-t">Entra en estos días, pero es para ${sig}</p>${proximos.map(e => fila(e, false)).join("")}` : ""}
     ${hechos.length ? `<details class="hechos"><summary>Ya cobrado y pagado (${hechos.length})</summary>${hechos.map(e => `<button class="renglon ce" data-act="cajaHecho" data-m="${e.mes}" data-k="${e.clave}">
       <span>${esc(e.nombre)} <small style="color:var(--muted)">${e.hecho.implicito ? (e.monto > 0 ? "ya estaba en tus saldos" : "marcado pagado")
-        : `${diaYMes(e.hecho.fecha)} · ${esc(nombreCuenta(F, e.hecho.cuenta))}`}</small></span><b>${conSigno(e.hecho.monto)}</b></button>`).join("")}</details>` : ""}
+        : `${diaYMes(e.hecho.fecha)} · ${esc(nombreCuenta(F, e.hecho.cuenta))}`}${e.proximo ? ` · para ${sig}` : ""}</small></span><b>${conSigno(e.hecho.monto)}</b></button>`).join("")}</details>` : ""}
     <p class="pie">Tocá ✓ cuando cobrás o pagás: suma o resta de la cuenta que elijas. Los gastos con débito o efectivo restan de su cuenta al cargarlos; los de tarjeta, cuando pagás el resumen.
       ${sinFecha.some(e => e.monto < 0 && e.clave[0] !== "m") ? "Con el día de pago de cada gasto de la casa (en Casa), cae en su día y el aviso llega antes." : ""}</p></div>`;
 }
@@ -2656,6 +2686,8 @@ function editarCuentas(){
     ${F.cuentas.length ? "Si no coincide con lo que calcula Mi Prime, la diferencia queda como lo que se fue (o entró) sin anotar." : ""}</p>
     <div id="cuentas">${lista.map(fila).join("")}</div>
     <button class="linkbtn" data-x="a">+ Otra cuenta</button>
+    ${F.cuentas.length ? `<label class="chk"><input type="checkbox" id="cuDeNuevo"> Empezar la caja de nuevo con estos saldos: borra lo marcado como cobrado o pagado
+      (los pagos quedan marcados) y los ajustes</label>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
   const $ = q => modal.querySelector(q), cont = $("#cuentas");
   cont.addEventListener("click", e => { if(e.target.closest('[data-x="q"]')) e.target.closest(".frow-c").remove(); });
@@ -2664,15 +2696,22 @@ function editarCuentas(){
   $('[data-x="o"]').onclick = () => {
     const filas = [...cont.querySelectorAll(".frow-c")].map(r => ({ id: r.dataset.id, nombre: r.querySelector(".cu-n").value.trim().slice(0, 30), t: r.querySelector(".cu-s").value.trim() }));
     if(filas.some(f => f.t !== "" && !(Math.abs(Number(f.t)) <= 1e10)) || filas.some(f => f.id && (!f.nombre || f.t === ""))){ toast("Cada cuenta con nombre y saldo"); return; }
-    const quedan = new Set(filas.map(f => f.id).filter(Boolean));
+    const quedan = new Set(filas.map(f => f.id).filter(Boolean)), deNuevo = $("#cuDeNuevo")?.checked;
     F.cuentas = F.cuentas.filter(c => quedan.has(c.id));
+    if(deNuevo){                                     // lo de antes queda en los saldos de hoy
+      F.hechos = {}; F.ajustes = []; F.pendientes = {};
+      for(const c of F.cuentas) Object.assign(c, { saldo: Math.round(saldoCuenta(F, c)), fecha: TODAY, n: sello(F) });
+    }
     for(const f of filas){
       if(!f.nombre || f.t === "") continue;
       const saldo = Math.round(Number(f.t)), c = f.id && F.cuentas.find(x => x.id === f.id);
       if(!c){ F.cuentas.push({ id: uid(), nombre: f.nombre, saldo, fecha: TODAY, n: sello(F) }); continue; }
       c.nombre = f.nombre;
       const actual = Math.round(saldoCuenta(F, c));
-      if(saldo !== actual){ F.ajustes.push({ fecha: TODAY, cuenta: c.id, dif: saldo - actual }); Object.assign(c, { saldo, fecha: TODAY, n: sello(F) }); }
+      if(saldo !== actual){
+        if(!deNuevo) F.ajustes.push({ fecha: TODAY, cuenta: c.id, dif: saldo - actual });   // de nuevo: el saldo de hoy es el punto de partida
+        Object.assign(c, { saldo, fecha: TODAY, n: sello(F) });
+      }
     }
     save(); closeSheet(); render(); toast(`Tu plata hoy: ${aPesos(suma(F.cuentas, c => saldoCuenta(F, c)))}`);
   };
@@ -2702,13 +2741,15 @@ function marcarHecho(mes, clave){
   const previa = Object.values(F.hechos[sumarMeses(mes, -1)] || {}).length ? F.hechos[sumarMeses(mes, -1)][clave]?.cuenta : undefined;
   const elegida = F.cuentas.some(c => c.id === previa) ? previa : F.cuentas[0]?.id || "";
   sheet(`<h3>${entra ? "Cobraste" : "Pagaste"} ${esc(e.nombre)}</h3>
-    <p class="sub">${entra ? "Poné lo que entró de verdad" : "Poné lo que pagaste de verdad (si pagaste el mínimo, el mínimo)"}; ${e.fecha ? `estaba para el ${fechaCorta(e.fecha)}` : "no tenía fecha"}.</p>
+    <p class="sub">${entra ? "Poné lo que entró de verdad" : "Poné lo que pagaste de verdad (si pagaste el mínimo, el mínimo)"}; ${e.fecha ? `estaba para el ${fechaCorta(e.fecha)}` : "no tenía fecha"}.
+      ${e.proximo ? `Es plata de ${MESES[Number(mes.slice(5)) - 1]}.` : ""}</p>
+    ${e.fecha && e.fecha > TODAY ? `<p class="alerta-caja" style="margin:0 0 10px">Todavía no es ${diaYMes(e.fecha)}: marcalo cuando ${entra ? "entre" : "lo pagues"}.</p>` : ""}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
       <div><label class="campo" for="hMonto">${entra ? "Cuánto entró" : "Cuánto pagaste"}</label><input type="number" id="hMonto" inputmode="numeric" min="0" value="${Math.abs(e.monto)}"></div>
       <div><label class="campo" for="hFecha">Cuándo</label><input type="date" id="hFecha" max="${TODAY}" value="${TODAY}"></div></div>
     <label class="campo" for="hCuenta">${entra ? "A qué cuenta entró" : "De qué cuenta salió"}</label>
     <select id="hCuenta">${F.cuentas.map(c => `<option value="${c.id}"${c.id === elegida ? " selected" : ""}>${esc(c.nombre)}</option>`).join("")}
-      <option value=""${elegida ? "" : " selected"}>No pasó por mis cuentas (se descontó o se compensó)</option></select>
+      <option value=""${elegida ? "" : " selected"}>No toca mis saldos (ya estaba en lo que cargué, o fue un descuento o un saldo a favor)</option></select>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">${entra ? "Cobrado" : "Pagado"}</button></div>`);
   const $ = q => modal.querySelector(q);
   $('[data-x="c"]').onclick = closeSheet;
@@ -2738,7 +2779,7 @@ function bienvenidaFinHTML(){
 function mesFinHTML(F){
   const mes = FIN_MES || mesDelPlan(F), r = resumenMes(F, mes, TODAY), nombre = MESES[Number(mes.slice(5)) - 1];
   const falta = suma(vencimientos(F, mes).filter(v => !v.pagado), v => v.monto);
-  const queda = (p, g) => mes === mesDe(TODAY) ? Math.max(0, p - g) : mes > mesDe(TODAY) ? p : 0;
+  const actual = mesDeLaPlata(F, TODAY), queda = (p, g) => mes === actual ? Math.max(0, p - g) : mes > actual ? p : 0;
   const t = r.tarjeta, deTarjeta = t.enResumen || mes < mesDe(TODAY) ? 0 : t.total;
   const resto = [[queda(r.presupuesto, r.gastado), "de alimentos"], [queda(r.presupuestoGastos, r.gastadoGastos), "de otros gastos"], [deTarjeta, "de tarjeta"]]
     .filter(([n]) => n).map(([n, t]) => `${aPesos(n)} ${t}`);
@@ -2922,7 +2963,7 @@ function habitosFinHTML(){
 function detalleHabitoFin(regla){
   const F = S.finanzas;
   if(regla === "anotar"){ const t = suma(F?.gastos?.[TODAY], g => g.total); return t ? `${aPesos(t)} anotado hoy` : "nada anotado hoy"; }
-  if(regla === "ritmo") return `${aPesos(gastadoHasta(F?.gastos, TODAY))} de ${aPesos(topeRitmo(presupuestoAlimentos(F), TODAY))} hasta hoy`;
+  if(regla === "ritmo") return `${aPesos(gastadoHasta(F, TODAY))} de ${aPesos(topeRitmo(F, presupuestoAlimentos(F), TODAY))} hasta hoy`;
   if(regla === "vencimientos"){
     const n = [sumarMeses(mesDe(TODAY), -1), mesDe(TODAY)].filter(m => !(F?.inicio > m)).flatMap(m => vencimientos(F, m))
       .filter(v => v.fecha && v.fecha < TODAY && !v.pagado).length;
@@ -3044,28 +3085,30 @@ function marcarPagado(mes, clave){
 let GASTOS_MES = null;                 // el mes que se ve; null = el de hoy
 let ANA_VISTA = "semana", ANA_REF = null, GASTOS_DIAS = [], GASTOS_MESES = [];
 const MEDIOS_CORTO = { debito: "débito o efectivo", tarjeta: "tarjeta", cuotas: "en cuotas" };
+const mesActualGastos = F => mesDeLaPlata(F, TODAY);
 function vGastos(){
-  const F = fin(), mes = GASTOS_MES || mesDe(TODAY);
+  const F = fin(), mes = GASTOS_MES || mesActualGastos(F);
   return navGastos(F, mes) + resumenGastosHTML(F, mes) + cargarGastoHTML() + sobresHTML(F, mes) + diarioHTML(F, mes)
     + analisisHTML(F) + cierreHTML(F, mes) + comoVamosHTML(F, mes);
 }
 function navGastos(F, mes){
-  const primero = Object.keys(F.gastos).sort()[0];
-  return `<div class="mnav"><button data-act="gmes" data-n="-1" aria-label="Mes anterior"${!primero || mesDe(primero) >= mes ? " disabled" : ""}>‹</button>
-    <b>${nombreMes(mes)}</b><button data-act="gmes" data-n="1" aria-label="Mes siguiente"${mes >= mesDe(TODAY) ? " disabled" : ""}>›</button></div>`;
+  const primero = Object.keys(F.gastos).sort()[0], { desde, hasta } = rangoMes(F, mes), calendario = desde === fechaDelMes(mes, 1);
+  return `<div class="mnav"><button data-act="gmes" data-n="-1" aria-label="Mes anterior"${!primero || mesDeLaPlata(F, primero) >= mes ? " disabled" : ""}>‹</button>
+    <b>${nombreMes(mes)}${calendario ? "" : `<small class="rango">del ${diaYMes(desde)} al ${diaYMes(hasta)}, de cobro a cobro</small>`}</b>
+    <button data-act="gmes" data-n="1" aria-label="Mes siguiente"${mes >= mesActualGastos(F) ? " disabled" : ""}>›</button></div>`;
 }
 const presupuestoTotal = F => presupuestoAlimentos(F) + presupuestoGastos(F);
 function resumenGastosHTML(F, mes){
-  const e = estadisticasGastos(F.gastos, mes, TODAY), pres = presupuestoTotal(F), antes = F.inicio > mes, nombre = MESES[Number(mes.slice(5)) - 1];
-  const rit = ritmoAlimentos(pres, e.total, mes, TODAY), pct = n => e.total ? Math.round(100 * n / e.total) : 0;
-  const deCasa = suma(gastosDelMes(F.gastos, mes).filter(x => x.g.deCasa), x => x.g.total);
+  const e = estadisticasGastos(F, mes, TODAY), pres = presupuestoTotal(F), antes = F.inicio > mes, nombre = MESES[Number(mes.slice(5)) - 1];
+  const rit = ritmoAlimentos(F, pres, e.total, mes, TODAY), pct = n => e.total ? Math.round(100 * n / e.total) : 0;
+  const deCasa = suma(gastosDelMes(F, mes).filter(x => x.g.deCasa), x => x.g.total);
   const sub = antes ? `en ${nombre}; el presupuesto arranca en ${MESES[Number(F.inicio.slice(5)) - 1]}` : !pres ? `en ${nombre} · sin presupuesto`
     : e.total <= pres ? `de ${aPesos(pres)} · quedan ${aPesos(pres - e.total)}` : `de ${aPesos(pres)} · te pasaste ${aPesos(e.total - pres)}`;
   return `<div class="card gastos-mes"><div class="card-t">Administración de gastos</div>${heroInner(aPesos(e.total), sub)}
     ${!antes && pres ? barra(e.total, pres, e.total <= pres ? "var(--ok)" : "var(--fail)") : ""}
     ${e.total ? `<p class="tipos" style="margin:12px 0 0;font-size:14.5px">Necesario <b>${aPesos(e.necesario)}</b> (${pct(e.necesario)} %) · Gustos <b>${aPesos(e.gustos)}</b> (${pct(e.gustos)} %)</p>` : ""}
     ${!antes && pres && rit.dias >= 7 && rit.quedan > 0 ? `<p class="ritmo" style="margin:8px 0 0;font-size:14.5px">Para los ${rit.dias} días que quedan: unos <b>${aPesos(rit.porSemana)} por semana</b>.</p>` : ""}
-    ${mes === mesDe(TODAY) && F.cuentas.length ? `<p class="caja-libre" style="margin:8px 0 0;font-size:14.5px">${textoLibre(cajaDelMes(F, TODAY))}</p>` : ""}
+    ${mes === mesActualGastos(F) && F.cuentas.length ? `<p class="caja-libre" style="margin:8px 0 0;font-size:14.5px">${textoLibre(cajaDelMes(F, TODAY))}</p>` : ""}
     ${!antes && pres && e.proyeccion != null ? `<p class="proyeccion" style="margin:8px 0 0;font-size:14.5px">A este ritmo terminás el mes en <b>${aPesos(e.proyeccion)}</b>, el ${Math.round(100 * e.proyeccion / pres)} % del presupuesto.</p>` : ""}
     ${deCasa ? `<p class="pie">Además, ${aPesos(deCasa)} que ya están en los gastos de la casa: se ven, pero no suman.</p>` : ""}</div>`;
 }
@@ -3117,11 +3160,11 @@ function sobresHTML(F, mes){
 }
 /* El libro diario: los gastos del mes, de hoy para atrás, con el total de cada día */
 function diarioHTML(F, mes){
-  const l = gastosDelMes(F.gastos, mes), dias = [...new Set(l.map(x => x.fecha))].reverse();
+  const l = gastosDelMes(F, mes), dias = [...new Set(l.map(x => x.fecha))].reverse();
   return `<div class="card diario"><div class="card-t">Movimientos de ${MESES[Number(mes.slice(5)) - 1]}</div>
     ${dias.length ? dias.map(d => { const del = l.filter(x => x.fecha === d);
       return `<p class="frec-t">${cap(fechaCorta(d))} · ${aPesos(suma(del.filter(x => !x.g.deCasa), x => x.g.total))}</p>${del.map(filaGasto).join("")}`; }).join("")
-      : `<p style="margin:0;color:var(--muted);font-size:13.5px">${mes === mesDe(TODAY) ? "Todavía no cargaste gastos este mes." : "Ese mes no cargaste gastos."}</p>`}</div>`;
+      : `<p style="margin:0;color:var(--muted);font-size:13.5px">${mes === mesActualGastos(F) ? "Todavía no cargaste gastos este mes." : "Ese mes no cargaste gastos."}</p>`}</div>`;
 }
 function filaGasto({ g, fecha, i }){
   const detalle = [nombreCategoria(g.categoria), g.medio === "cuotas" && g.cuotas ? `en ${g.cuotas} cuotas` : MEDIOS_CORTO[g.medio] || "", g.items?.length ? `${g.items.length} ${g.items.length === 1 ? "renglón" : "renglones"} del ticket` : "",
@@ -3180,12 +3223,15 @@ function ponerCampos(g, c){
 
 /* ---- dónde se va la plata: por semana o por mes, para mirarlo los sábados ---- */
 function analisisHTML(F){
-  const ref = ANA_REF || TODAY, { desde, hasta } = rangoPasos(ANA_VISTA, ref), previo = rangoPasos(ANA_VISTA, moverPasos(ANA_VISTA, ref, -1));
+  const ref = ANA_REF || TODAY, mesRef = mesDeLaPlata(F, ref);
+  const { desde, hasta } = ANA_VISTA === "mes" ? rangoMes(F, mesRef) : rangoPasos(ANA_VISTA, ref);
+  const previo = ANA_VISTA === "mes" ? rangoMes(F, sumarMeses(mesRef, -1)) : rangoPasos(ANA_VISTA, moverPasos(ANA_VISTA, ref, -1));
   const a = analisisGastos(F.gastos, desde, hasta), b = analisisGastos(F.gastos, previo.desde, previo.hasta), semana = ANA_VISTA === "semana";
   const antes = semana ? "la semana anterior" : "el mes anterior";
   const cabeza = `<div class="card analisis"><div class="card-t">Dónde se va la plata</div>
     <div class="chips">${[["semana", "Semana"], ["mes", "Mes"]].map(([k, t]) => `<button class="chip" data-act="avista" data-v="${k}" aria-pressed="${ANA_VISTA === k}">${t}</button>`).join("")}</div>
-    <div class="cab" style="margin:0 0 6px"><span style="font-size:14px;font-weight:600">${tituloPasos(ANA_VISTA, desde, hasta)}</span>
+    <div class="cab" style="margin:0 0 6px"><span style="font-size:14px;font-weight:600">${ANA_VISTA === "mes" ? cap(nombreMes(mesRef))
+      + (desde.endsWith("-01") ? "" : ` <small style="color:var(--muted);font-weight:400">${diaYMes(desde)} al ${diaYMes(hasta)}</small>`) : tituloPasos(ANA_VISTA, desde, hasta)}</span>
       <button data-act="amov" data-n="-1" aria-label="${semana ? "Semana" : "Mes"} anterior">‹</button>
       <button data-act="amov" data-n="1" aria-label="${semana ? "Semana" : "Mes"} siguiente"${hasta >= TODAY ? " disabled" : ""}>›</button></div>`;
   if(!a.n) return cabeza + `<p style="margin:0;color:var(--muted);font-size:13.5px">No cargaste gastos ${semana ? "esa semana" : "ese mes"}.</p></div>`;
@@ -3207,9 +3253,9 @@ const PASOS_CIERRE = [["conciliado", "Comparé con los resúmenes de la tarjeta 
                       ["desvios", "Revisé dónde me pasé y por qué"],
                       ["presupuesto", "Ajusté el presupuesto del mes que viene"]];
 function cierreHTML(F, mes){
-  const c = F.cierres[mes] || {}, hechos = PASOS_CIERRE.filter(([k]) => c[k]).length, e = estadisticasGastos(F.gastos, mes, TODAY), pres = presupuestoTotal(F);
+  const c = F.cierres[mes] || {}, hechos = PASOS_CIERRE.filter(([k]) => c[k]).length, e = estadisticasGastos(F, mes, TODAY), pres = presupuestoTotal(F);
   const pasados = sobresDelMes(F, mes).filter(x => x.presupuesto && x.gastado > x.presupuesto).sort((a, b) => (b.gastado - b.presupuesto) - (a.gastado - a.presupuesto));
-  const pct = n => e.total ? Math.round(100 * n / e.total) : 0, temprano = mes === mesDe(TODAY) && parseISO(TODAY).getDate() < 25;
+  const pct = n => e.total ? Math.round(100 * n / e.total) : 0, temprano = mes === mesActualGastos(F) && diasEntre(TODAY, rangoMes(F, mes).hasta) > 5;
   return `<div class="card cierre"><div class="card-t">Cierre de ${MESES[Number(mes.slice(5)) - 1]} · ${hechos} de ${PASOS_CIERRE.length}</div>
     ${temprano ? `<p style="margin:0 0 4px;font-size:13px;color:var(--muted)">Se hace el último día del mes o en los primeros del siguiente.</p>` : ""}
     ${conciliacionHTML(F, mes)}
@@ -3283,7 +3329,8 @@ function curvaGastos(serie, pres){
   let fondo = "";
   for(let v = 0; v <= tope; v += paso) fondo += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>`
     + `<text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end" class="eje">${pesosCorto(v)}</text>`;
-  const ejes = [0, 9, 19, n - 1].map(i => `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" class="eje">${i + 1}</text>`).join("");
+  const etiqueta = i => { const d = parseISO(serie[i].fecha); return serie[0].fecha.endsWith("-01") ? d.getDate() : `${d.getDate()}/${d.getMonth() + 1}`; };
+  const ejes = [0, 9, 19, n - 1].map(i => `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" class="eje">${etiqueta(i)}</text>`).join("");
   const ritmo = pres ? `<line x1="${x(0)}" y1="${y(pres / n)}" x2="${x(n - 1)}" y2="${y(pres)}" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round"/>` : "";
   const puntos = serie.map((s, i) => s.acumulado == null ? null : `${x(i).toFixed(1)},${y(s.acumulado).toFixed(1)}`).filter(Boolean);
   const linea = puntos.length > 1 ? `<polyline points="${puntos.join(" ")}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
@@ -3319,10 +3366,10 @@ function partes(lista, total){
     ${l.map(([t, n], i) => `<div class="parte"><i style="opacity:${TONOS[i]}"></i><span>${t}</span><b>${Math.round(100 * n / total)} %</b><small>${aPesos(n)}</small></div>`).join("")}`;
 }
 function comoVamosHTML(F, mes){
-  const e = estadisticasGastos(F.gastos, mes, TODAY), pres = F.inicio > mes ? 0 : presupuestoTotal(F);
+  const e = estadisticasGastos(F, mes, TODAY), pres = F.inicio > mes ? 0 : presupuestoTotal(F);
   if(!e.n) return `<div class="card como-vamos"><div class="card-t">Cómo vamos</div>
     <p style="margin:0;color:var(--muted);font-size:13.5px">Cuando cargues gastos, acá vas a ver cómo va el mes en gráficos y estadísticas.</p></div>`;
-  const ant = estadisticasGastos(F.gastos, sumarMeses(mes, -1), TODAY), meses = totalesPorMes(F.gastos, mes, 6), n = e.serie.length;
+  const ant = estadisticasGastos(F, sumarMeses(mes, -1), TODAY), meses = totalesPorMes(F, mes, 6), n = e.serie.length;
   const pct = x => Math.round(100 * x / e.total);
   GASTOS_DIAS = e.serie.map((s, i) => `${cap(fechaCorta(s.fecha))}: ${s.acumulado == null ? "todavía no pasó" : `gastaste ${aPesos(s.gastado)}, ${aPesos(s.acumulado)} en el mes`}`
     + (pres ? ` · al ritmo del presupuesto, ${aPesos(Math.round(pres * (i + 1) / n))}` : ""));
@@ -3346,7 +3393,7 @@ function comoVamosHTML(F, mes){
       ${tile(`${pct(e.gustos)} %`, "Gustos")}${tile(`${pct(e.medios.tarjeta + e.medios.cuotas)} %`, "Con tarjeta")}
       ${tile(vsAnt == null ? "—" : `${vsAnt > 0 ? "+" : vsAnt < 0 ? "−" : ""}${Math.abs(vsAnt)} %`, "Vs. mes anterior")}</div>
     <p class="pie">${e.mejorDia ? `El día de más gasto, el ${fechaCorta(e.mejorDia.fecha)}, se fueron ${aPesos(e.mejorDia.total)}. ` : ""}${e.proyeccion != null && pres ? `A este ritmo terminás en ${aPesos(e.proyeccion)}. ` : ""}Hormiga: gastos de menos de ${aPesos(HORMIGA)}.
-      Con tarjeta: en un pago y en cuotas. ${mes === mesDe(TODAY) ? "El mes anterior se compara entero." : ""}</p></div>`;
+      Con tarjeta: en un pago y en cuotas. ${mes === mesActualGastos(F) ? "El mes anterior se compara entero." : ""}</p></div>`;
 }
 
 /* ---- presupuestos, carga y edición ---- */
@@ -3372,7 +3419,8 @@ function editarPresupuestos(){
 function guardarGasto(g, fecha){
   const F = fin();
   (F.gastos[fecha] ||= []).push({ id: uid(), ...g, ...(g.cuenta ? { n: sello(F) } : {}) });
-  GASTOS_MES = mesDe(fecha) === mesDe(TODAY) ? null : mesDe(fecha);
+  const m = mesDeLaPlata(F, fecha);
+  GASTOS_MES = m === mesActualGastos(F) ? null : m;
   save(); render(); toast(`${g.comercio}: ${aPesos(g.total)} en ${nombreCategoria(g.categoria)}${g.deCasa ? " (ya está en la casa)" : ""}`);
 }
 function gastoAMano(){
@@ -3637,8 +3685,8 @@ function onAct(e){
     case "fticket": elegirFoto(true, [], "", FOTO_TICKET); break;
     case "fgaleria": elegirFoto(false, [], "", FOTO_TICKET); break;
     case "fmano": gastoAMano(); break;
-    case "irGastos": TAB = "gastos"; GASTOS_MES = FIN_MES && FIN_MES <= mesDe(TODAY) ? FIN_MES : null; render(); break;
-    case "gmes": { const m = sumarMeses(GASTOS_MES || mesDe(TODAY), +el.dataset.n); GASTOS_MES = m >= mesDe(TODAY) ? null : m; render(); break; }
+    case "irGastos": { const a = mesActualGastos(fin()); TAB = "gastos"; GASTOS_MES = FIN_MES && FIN_MES < a ? FIN_MES : null; render(); break; }
+    case "gmes": { const a = mesActualGastos(fin()), m = sumarMeses(GASTOS_MES || a, +el.dataset.n); GASTOS_MES = m >= a ? null : m; render(); break; }
     case "gpres": editarPresupuestos(); break;
     case "gconc": editarConciliacion(el.dataset.m); break;
     case "ftarjeta": verTarjeta(el.dataset.m); break;
@@ -3646,7 +3694,10 @@ function onAct(e){
     case "gdia": document.getElementById("gdet").textContent = GASTOS_DIAS[+el.dataset.i] || ""; break;
     case "gmesbar": document.getElementById("gdet2").textContent = GASTOS_MESES[+el.dataset.i] || ""; break;
     case "avista": ANA_VISTA = el.dataset.v; ANA_REF = null; render(); break;
-    case "amov": { const r = moverPasos(ANA_VISTA, ANA_REF || TODAY, +el.dataset.n); ANA_REF = r > TODAY ? TODAY : r; render(); break; }
+    case "amov": {
+      const F = fin(), r = ANA_VISTA === "mes" ? rangoMes(F, sumarMeses(mesDeLaPlata(F, ANA_REF || TODAY), +el.dataset.n)).desde : moverPasos(ANA_VISTA, ANA_REF || TODAY, +el.dataset.n);
+      ANA_REF = r > TODAY ? TODAY : r; render(); break;
+    }
     case "fgasto": editarGasto(el.dataset.d, +el.dataset.i); break;
     case "fborrarGasto": confirmarBorradoGasto(el.dataset.d, +el.dataset.i); break;
     case "flista": verListaFin(el.dataset.k); break;
