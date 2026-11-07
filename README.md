@@ -226,9 +226,15 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   aparece aparte recién en los últimos días y, marcado, queda reservado para el
   mes que viene (tocando la reserva se deshace). *Ajustar los saldos* con lo que
   dice el banco deja la diferencia como lo que se fue (o entró) **sin anotar**:
-  así la conciliación sale sola; *Empezar la caja de nuevo* toma los saldos de
-  hoy como punto de partida y borra lo marcado y los ajustes. Hoy también
-  muestra tu plata, lo libre y el día que no alcanza.
+  así la conciliación sale sola. Para mover plata entre tus cuentas o sacar
+  efectivo está *Pasar plata de una cuenta a otra*: resta de una y suma a la otra,
+  sin contar como gasto ni como sin anotar, y se puede deshacer. Si se borra del
+  plan algo que ya se marcó cobrado o pagado, lo marcado sigue en el saldo y se ve
+  como *Ya no está en el plan*, para sacarlo si no pasó. *Empezar la caja de
+  nuevo* toma los saldos de hoy como punto de partida: lo cobrado y pagado sigue
+  marcado, pero como ya incluido en esos saldos, y se borran los ajustes y lo
+  marcado del mes que viene. Hoy también muestra tu plata, lo libre y el día que
+  no alcanza.
 
 - **El plan del mes** (con ‹ › para ver otros): lo que entra, la casa, alimentos
   y cuotas, y cuánto **sobra o falta**. Lo que pasa una sola vez (un adelanto
@@ -290,7 +296,8 @@ demás (por ejemplo, los gastos ya cargados y sus presupuestos). Con
 `{ "actualizar": { "deudas": [ ... ] } }` cambia por `id` lo que ya está y suma
 lo nuevo, sin tocar el resto: sirve para cargar un resumen nuevo de la tarjeta
 sin pisar lo cargado en el celular. `"presupuestos": { "salidas": 80000 }`
-cambia solo esas categorías (con 0, la saca). `inicio` es el primer
+cambia solo esas categorías (con 0, la saca), y `"hechos": { "2026-11": { "m:id": { ... } } }`
+corrige lo marcado cobrado o pagado en la caja (con `null`, lo saca). `inicio` es el primer
 mes del plan: antes no se cuenta ni se avisa. Los datos viven en el teléfono y
 viajan en el respaldo, como el resto; nunca van al repo.
 
@@ -405,7 +412,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                528 pruebas automatizadas (Playwright)
+├── test.mjs                544 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)

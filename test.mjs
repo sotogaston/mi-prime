@@ -2159,8 +2159,9 @@ console.log('\n== 44. La caja: la plata de verdad, día por día ==');
   await p2.locator('.frow-c').nth(0).locator('.cu-s').fill('250000'); await p2.locator('#cuDeNuevo').check();
   await p2.locator('.sheet [data-x="o"]').click(); await p2.waitForTimeout(150);
   const Fn = (await S2()).finanzas;
-  ok('empezar de nuevo: los saldos de hoy, sin lo marcado ni los ajustes; el pago queda marcado', JSON.stringify(Fn.hechos) === '{}' && Fn.ajustes.length === 0
-    && Fn.cuentas[0].saldo === 250000 && Fn.pagos['2026-11'].includes('f:f1') && /Tu plata hoy\s+\$ 250\.000/i.test(await caja2()));
+  ok('empezar de nuevo: los saldos de hoy y sin ajustes; lo pagado sigue marcado, pero ya incluido en el saldo', Fn.hechos['2026-11']['f:f1'].cuenta === ''
+    && Object.keys(Fn.hechos).join() === '2026-11' && Fn.ajustes.length === 0 && Fn.cuentas[0].saldo === 250000 && Fn.pagos['2026-11'].includes('f:f1')
+    && /Tu plata hoy\s+\$ 250\.000/i.test(await caja2()) && !/Alquiler\s+queda/.test(await caja2()));
   // Gastos: el mes de la plata va de cobro a cobro
   await ir(p2, 'gastos');
   ok('Gastos de noviembre va del 30/10 al 29/11: lo del día del cobro cuenta en noviembre', /del 30\/10 al 29\/11, de cobro a cobro/.test(await p2.locator('.mnav').innerText())
@@ -2177,7 +2178,76 @@ console.log('\n== 44. La caja: la plata de verdad, día por día ==');
   await c2.close();
 }
 
-console.log('\n== 45. Capturas ==');
+console.log('\n== 45. Transferencias entre cuentas, lo que ya no está en el plan y la pantalla quieta ==');
+{
+  const L = cargarLogica(estado());
+  const cu = [{ id: 'mp', nombre: 'Mercado Pago', saldo: 500000, fecha: '2026-11-01', n: 1 }, { id: 'ef', nombre: 'Efectivo', saldo: 20000, fecha: '2026-11-01', n: 2 }];
+  const F = { ...finanzas(), cuentas: cu, hechos: {}, ajustes: [], sello: 4, gastos: {},
+    transferencias: [{ id: 't1', fecha: '2026-11-03', de: 'mp', a: 'ef', monto: 90000, n: 3 }, { id: 't0', fecha: '2026-11-01', de: 'ef', a: 'mp', monto: 5000, n: 0 }] };
+  ok('una transferencia resta de una cuenta y suma a la otra; la de antes del saldo, no', L.saldoCuenta(F, cu[0]) === 410000 && L.saldoCuenta(F, cu[1]) === 110000
+    && L.cajaDelMes(F, '2026-11-04').total === 520000);
+  ok('y no cuenta como sin anotar', L.conciliacionMes(F, '2026-11').sinAnotar === 0);
+  const Fh = { ...F, hechos: { '2026-11': { 'i:borrado': { monto: 350000, cuenta: 'mp', fecha: '2026-11-03', n: 4 } } } };
+  const ch = L.cajaDelMes(Fh, '2026-11-04');
+  ok('lo cobrado de algo que se borró del plan sigue en el saldo y se ve aparte', ch.total === 870000 && ch.hechos.some(e => e.huerfano && e.clave === 'i:borrado' && e.monto === 350000));
+
+  const st = { ...estado({ lastClosed: '2026-11-03' }), finanzas: F };
+  const { p, c, errs } = await abrirEn('2026-11-04', st);
+  const S = () => p.evaluate(() => window.__prime.S), caja = () => p.locator('.caja').innerText();
+  await ir(p, 'finanzas');
+  await p.locator('.caja [data-act="cajaTransf"]').click();
+  ok('pasar plata entre cuentas: de, a, cuánto y cuándo', await p.locator('#tDe').inputValue() === 'mp' && await p.locator('#tA').inputValue() === 'ef');
+  await p.locator('#tA').selectOption('mp'); await p.locator('#tMonto').fill('1000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(80);
+  ok('a la misma cuenta no se puede', await p.locator('.sheet #tDe').count() === 1);
+  await p.locator('#tDe').selectOption('ef'); await p.locator('#tMonto').fill('40000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('pasado: Efectivo baja y Mercado Pago sube, el total no cambia', /Tu plata hoy\s+\$ 520\.000\s+Mercado Pago \$ 450\.000 · Efectivo \$ 70\.000/i.test(await caja())
+    && (await S()).finanzas.transferencias.length === 3);
+  await p.locator('.caja .transf summary').click();
+  ok('las transferencias del mes se ven', /Efectivo → Mercado Pago\s+4\/11\s+\$ 40\.000/.test(await p.locator('.caja .transf').innerText())
+    && /Mercado Pago → Efectivo\s+3\/11\s+\$ 90\.000/.test(await p.locator('.caja .transf').innerText()));
+  await p.locator('.caja .transf [data-act="cajaTransfVer"]').last().click();
+  await p.locator('.sheet [data-x="d"]').click(); await p.waitForTimeout(150);
+  ok('y se deshacen', (await S()).finanzas.transferencias.length === 2 && /Mercado Pago \$ 410\.000 · Efectivo \$ 110\.000/i.test(await caja()));
+  // La pantalla no vuelve arriba al marcar algo más abajo
+  await p.locator('.venc, .caja .caja-ev').last().scrollIntoViewIfNeeded();
+  const antes = await p.evaluate(() => window.scrollY);
+  await p.locator('.caja [data-act="cajaHecho"][data-k="f:f2"]').click(); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const despues = await p.evaluate(() => window.scrollY);
+  ok(`marcar un pago no vuelve la pantalla arriba (${antes} → ${despues})`, antes > 200 && Math.abs(despues - antes) < 120);
+  await ir(p, 'hoy');
+  ok('cambiar de pestaña sí arranca arriba', await p.evaluate(() => window.scrollY) === 0);
+  await ir(p, 'finanzas');
+  // Corregir lo cobrado con un archivo: pasa un cobro de un ingreso borrado a un adelanto, sin cambiar los saldos
+  await p.evaluate(() => { const F = window.__prime.S.finanzas; F.hechos['2026-11'] = { ...(F.hechos['2026-11'] || {}), 'i:borrado': { monto: 350000, cuenta: 'mp', fecha: '2026-11-03', n: 20 } }; F.sello = 20; window.__prime.save(); window.__prime.render(); });
+  ok('lo de un ingreso borrado se ve como "ya no está en el plan" y sigue en el saldo (770 mil, con el colegio pagado)', /Ya no está en el plan/.test(await p.locator('.caja .hechos').first().textContent()) && /Tu plata hoy\s+\$ 770\.000/i.test(await caja()));
+  const archivo = data => ({ name: 'act.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(data)) });
+  const [fi] = await Promise.all([p.waitForEvent('filechooser'), p.locator('[data-act="fimport"]').click()]);
+  await fi.setFiles(archivo({ actualizar: { movimientos: [{ id: 'mA', mes: '2026-11', nombre: 'Adelanto de Crowdar', monto: 350000, deuda: true }],
+    hechos: { '2026-11': { 'm:mA': { monto: 350000, cuenta: 'mp', fecha: '2026-11-03', n: 20 }, 'i:borrado': null }, '2026-12': { 'i:nada': null } } } })); await p.waitForTimeout(200);
+  ok('el archivo dice que corrige lo cobrado', /Suma «Adelanto de Crowdar»\. Lo demás queda como está\./.test(await p.locator('.sheet').innerText())
+    && /Corrige 3 cosas cobradas o pagadas en la caja\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  const Fi = (await S()).finanzas;
+  ok('y queda como el adelanto, cobrado, con el mismo saldo', !Fi.hechos['2026-11']['i:borrado'] && Fi.hechos['2026-11']['m:mA'].monto === 350000
+    && (await S()).finanzas.movimientos.some(m => m.id === 'mA' && m.deuda) && /Tu plata hoy\s+\$ 770\.000/i.test(await caja()) && !/Ya no está en el plan/.test(await p.locator('.caja .hechos').first().textContent()));
+  await p.locator('.caja .hechos summary').first().click();
+  await p.locator('.caja .hechos [data-k="m:mA"]').click();
+  ok('el adelanto se ve cobrado en Mercado Pago', /Entró \$ 350\.000 el mar 3 nov · Mercado Pago\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="c"]').click();
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [], con = f => ({ ...base, finanzas: { ...base.finanzas, ...f } });
+    for (const f of [{ transferencias: [{ id: 'x', fecha: '2026-11-01', de: 'a', a: 'b', monto: 5, n: 1 }] }, { transferencias: [{ id: 'x', fecha: '2026-11-01', de: 'a', a: 'a', monto: 5, n: 1 }] },
+                     { transferencias: [{ id: 'x', fecha: '2026-11-01', de: 'a', a: 'b', monto: 0, n: 1 }] }])
+      try { P.prepararRespaldo(JSON.stringify(con(f))); r.push('ok'); } catch (e) { r.push('no'); }
+    try { P.finanzasImportadas(P.S.finanzas, { actualizar: { hechos: { '2026-11': 'x' } } }); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae las transferencias y rechaza las rotas (' + resp + ')', resp === 'ok,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 46. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
