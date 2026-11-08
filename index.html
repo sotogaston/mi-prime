@@ -959,6 +959,62 @@ function marcarPorPasos(S, hoy){
    por kilo, para bajar grasa sin perder músculo. */
 const ACTIVIDAD = [[1.2, "Sedentaria"], [1.375, "Liviana (1 a 3 días de ejercicio)"],
                    [1.55, "Moderada (3 a 5 días)"], [1.725, "Intensa (6 o 7 días)"]];
+/* ---- el gasto real del día y el déficit ----
+   S.gasto = { "2026-11-08": { activas: 517 } }   calorías de actividad que leyó el celular (Health Connect)
+                             { total: 2064 }       o el total que dice Samsung Health, cargado a mano (manda)
+   S.cinta = { "2026-11-08": [{ id, inc, cam: { min, vel }, tro: { min, vel } }] }   sesiones de cinta
+   El gasto es el reposo (Mifflin-St Jeor) más la actividad, más la digestión (un 10 % de
+   lo que se comió, que el celular no cuenta), más lo que suma la inclinación de la cinta,
+   que el celular tampoco ve porque cuenta pasos. Para la cinta, las fórmulas del ACSM:
+   caminar VO2 = 0,1·v + 1,8·v·i + 3,5; trotar 0,2·v + 0,9·v·i + 3,5 (v en m/min, i la
+   pendiente; ml por kilo por minuto) y 5 kcal por litro de oxígeno. */
+function kcalCinta(peso, s){
+  let total = 0, extra = 0;
+  for(const [tramo, k, ki] of [[s?.cam, 0.1, 1.8], [s?.tro, 0.2, 0.9]]){
+    if(!(tramo?.min > 0 && tramo?.vel > 0)) continue;
+    const v = tramo.vel * 1000 / 60, i = (s.inc || 0) / 100, kcal = ml => ml * peso / 1000 * 5 * tramo.min;
+    total += kcal(k * v + ki * v * i + 3.5); extra += kcal(ki * v * i);
+  }
+  return { total: Math.round(total), extra: Math.round(extra) };
+}
+function gastoDelDia(S, ds){
+  const m = metasNutricion(S?.perfil); if(!m) return null;
+  const g = S.gasto?.[ds] || {}, cinta = suma(S.cinta?.[ds], x => kcalCinta(S.perfil.peso, x).extra);
+  const digestion = Math.round(totalComidas(S.comidas?.[ds]).kcal * 0.1);
+  if(g.total != null) return { fuente: "mano", base: g.total, digestion, cinta, total: g.total + digestion + cinta };
+  if(g.activas != null) return { fuente: "celular", reposo: m.tmb, activas: g.activas, digestion, cinta, total: m.tmb + g.activas + digestion + cinta };
+  return null;
+}
+/* La meta de calorías del día: con calorías propias para el fin de semana (perfil.finde),
+   lo que se come de más el sábado y el domingo se descuenta de lunes a viernes, para que
+   la semana dé lo mismo */
+function metaDelDia(p, ds){
+  const m = metasNutricion(p); if(!m) return null;
+  if(!(p.finde > 0)) return m.kcal;
+  const dia = parseISO(ds).getDay();
+  if(dia === 0 || dia === 6) return p.finde;
+  return Math.max(p.sexo === "h" ? 1500 : 1200, Math.round((m.kcal * 7 - p.finde * 2) / 5 / 10) * 10);
+}
+/* La semana de lunes a domingo hasta ds: lo comido contra lo gastado en los días con los dos datos */
+function balanceSemana(S, ds){
+  const d = parseISO(ds), lunes = addDays(d, -((d.getDay() + 6) % 7)), dias = [];
+  for(let x = lunes; iso(x) <= ds; x = addDays(x, 1)){
+    const f = iso(x), g = gastoDelDia(S, f), c = totalComidas(S.comidas?.[f]).kcal;
+    if(g && c) dias.push({ fecha: f, comido: c, gasto: g.total });
+  }
+  const deficit = suma(dias, x => x.gasto - x.comido);
+  return { dias, comido: suma(dias, x => x.comido), gasto: suma(dias, x => x.gasto), deficit, kg: Math.round(deficit / 7700 * 100) / 100 };
+}
+/* Con al menos 5 días de gasto real en las últimas 2 semanas (sin hoy, que no terminó):
+   la actividad que mejor lo explica, si no es la del perfil */
+function calibrarActividad(S, hoy){
+  const m = metasNutricion(S?.perfil); if(!m) return null;
+  const dias = Array.from({ length: 14 }, (_, i) => iso(addDays(parseISO(hoy), -i - 1))).map(d => gastoDelDia(S, d)).filter(Boolean);
+  if(dias.length < 5) return null;
+  const promedio = Math.round(suma(dias, g => g.total) / dias.length), factor = promedio / m.tmb;
+  const [sugerida, nombre] = ACTIVIDAD.reduce((a, b) => Math.abs(b[0] - factor) < Math.abs(a[0] - factor) ? b : a);
+  return { dias: dias.length, promedio, factor: Math.round(factor * 100) / 100, sugerida, nombre, actual: S.perfil.actividad, distinta: sugerida !== S.perfil.actividad };
+}
 function perfilCompleto(p){
   return !!p && (p.sexo === "h" || p.sexo === "m") && [p.edad, p.altura, p.peso, p.pesoMeta, p.ritmo, p.actividad]
     .every(x => Number.isFinite(x) && x > 0);
@@ -2193,7 +2249,7 @@ function tarjetaFuentePasos(){
     <button class="btn" data-act="hcActualizar" style="margin-top:10px">Probar de nuevo</button></div></div>`;
   const msg = !e ? "Leyendo tus pasos de Health Connect…"
     : e.error === "sin-hc" ? "Este celular no tiene Health Connect, que es de donde la app lee los pasos de Samsung Health."
-    : e.error === "sin-permiso" ? "Dale permiso a Mi Prime para leer tus pasos de Health Connect. Se leen en el celular y no salen de ahí."
+    : e.error === "sin-permiso" ? "Dale permiso a Mi Prime para leer tus pasos y tus calorías de actividad de Health Connect. Se leen en el celular y no salen de ahí."
     : "No se pudieron leer los pasos: " + e.detalle;
   const boton = !e ? ""
     : e.error === "sin-hc" ? `<button class="btn" data-act="hcInstalar">Instalar Health Connect</button>`
@@ -2278,7 +2334,44 @@ function vPasos(){
     <b>${porMarcar} ${porMarcar === 1 ? "día" : "días"}</b> de “${esc(caminar.name)}”.
     <button class="linkbtn" data-act="pmarcar">Revisar</button></div></div>` : ""}
   ${filas ? `<div class="card"><details><summary>Ver los números</summary><table class="tbl" style="margin-top:8px">${filas}</table></details></div>` : ""}
+  ${cintaHTML()}
   ${historial}${NATIVO ? "" : tarjetaFuentePasos()}`;
+}
+/* La cinta: lo que el celular no ve (la inclinación) se carga acá y suma al gasto del día */
+function cintaHTML(){
+  const hoy = S.cinta?.[TODAY] || [], peso = S.perfil?.peso, desc = x => [x.cam?.min ? `${x.cam.min} min caminando a ${fmt1(x.cam.vel)} km/h` : "",
+    x.tro?.min ? `${x.tro.min} min trotando a ${fmt1(x.tro.vel)} km/h` : ""].filter(Boolean).join(" + ") + ` · ${fmt1(x.inc)} % de inclinación`;
+  return `<div class="card cinta"><div class="card-t">Cinta de hoy</div>
+    ${hoy.length ? hoy.map((x, i) => { const k = peso ? kcalCinta(peso, x) : null;
+      return `<div class="fila"><span class="n">${desc(x)}${k ? `<small>unas ${fmt(k.total)} kcal; ${fmt(k.extra)} por la inclinación, que el celular no ve</small>` : ""}</span>
+        <button class="x" data-act="cintaBorrar" data-i="${i}" aria-label="Sacar la sesión ${i + 1}">✕</button></div>`; }).join("")
+      : `<p style="margin:0;color:var(--muted);font-size:13.5px">Sin sesiones hoy.</p>`}
+    <button class="btn ghost" data-act="cintaAgregar">Agregar sesión de cinta</button>
+    <p class="pie">Llevá el celular en el bolsillo para que cuente los pasos. ${peso ? "Lo de la inclinación suma al gasto del día, en Comida." : "Con tu peso en el perfil (Comida) se calculan las calorías."}</p></div>`;
+}
+function agregarCinta(){
+  const u = S.settings.cinta || { inc: 4, cam: { min: 20, vel: 5.5 }, tro: { min: 0, vel: 6 } };
+  sheet(`<h3>Sesión de cinta</h3><p class="sub">Caminando, trotando o las dos (en intervalos, sumá los minutos de cada una).</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="ciCamMin">Caminando (min)</label><input type="number" id="ciCamMin" inputmode="numeric" min="0" max="300" value="${u.cam.min || ""}"></div>
+      <div><label class="campo" for="ciCamVel">a (km/h)</label><input type="number" id="ciCamVel" inputmode="decimal" step="0.5" min="1" max="20" value="${u.cam.vel}"></div>
+      <div><label class="campo" for="ciTroMin">Trotando (min)</label><input type="number" id="ciTroMin" inputmode="numeric" min="0" max="300" value="${u.tro.min || ""}"></div>
+      <div><label class="campo" for="ciTroVel">a (km/h)</label><input type="number" id="ciTroVel" inputmode="decimal" step="0.5" min="1" max="20" value="${u.tro.vel}"></div>
+      <div><label class="campo" for="ciInc">Inclinación (%)</label><input type="number" id="ciInc" inputmode="decimal" step="0.5" min="0" max="15" value="${u.inc}"></div></div>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Agregar</button></div>`);
+  const $ = q => modal.querySelector(q), n = id => Number(String($(id).value).replace(",", ".")) || 0;
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const x = { id: uid(), inc: n("#ciInc"), cam: { min: Math.round(n("#ciCamMin")), vel: n("#ciCamVel") }, tro: { min: Math.round(n("#ciTroMin")), vel: n("#ciTroVel") } };
+    if(!(x.cam.min + x.tro.min > 0) || x.cam.min > 300 || x.tro.min > 300){ toast("Poné los minutos"); return; }
+    if(!(x.inc >= 0 && x.inc <= 15) || (x.cam.min && !(x.cam.vel >= 1 && x.cam.vel <= 20)) || (x.tro.min && !(x.tro.vel >= 1 && x.tro.vel <= 20))){ toast("Revisá la velocidad y la inclinación"); return; }
+    if(!x.cam.min) delete x.cam; if(!x.tro.min) delete x.tro;
+    (S.cinta ||= {})[TODAY] = [...(S.cinta[TODAY] || []), x];
+    S.settings.cinta = { inc: x.inc, cam: x.cam || { min: 0, vel: u.cam.vel }, tro: x.tro || { min: 0, vel: u.tro.vel } };
+    save(); closeSheet(); render();
+    const k = S.perfil?.peso ? kcalCinta(S.perfil.peso, x) : null;
+    toast(k ? `Cinta: unas ${fmt(k.total)} kcal (${fmt(k.extra)} por la inclinación)` : "Sesión guardada");
+  };
 }
 function lineaMeta(meta){
   return `<p style="text-align:center;margin:6px 0 0"><button class="linkbtn" data-act="pmeta">Meta de lunes a viernes: ${fmt(meta)} pasos · Cambiar</button></p>`;
@@ -2322,9 +2415,9 @@ function vComida(){
       <p style="font-size:14px;margin:0;line-height:1.5">Completá tu perfil (peso, altura, edad, a dónde querés llegar) y la app calcula cuánto comer por día.</p>
       <button class="btn" data-act="cperfil">Completar perfil</button></div>` : "";
   const resumen = m ? (() => {
-    const quedan = m.kcal - t.kcal;
-    return `<div class="card">${heroInner(fmt(t.kcal), quedan >= 0 ? `de ${fmt(m.kcal)} kcal · quedan ${fmt(quedan)}` : `de ${fmt(m.kcal)} kcal · te pasaste ${fmt(-quedan)}`)}
-      ${barra(t.kcal, m.kcal, quedan >= 0 ? "var(--ok)" : "var(--fail)")}
+    const meta = metaDelDia(p, TODAY), quedan = meta - t.kcal, finde = p.finde > 0 ? ([0, 6].includes(parseISO(TODAY).getDay()) ? " (fin de semana)" : " (de lunes a viernes)") : "";
+    return `<div class="card">${heroInner(fmt(t.kcal), quedan >= 0 ? `de ${fmt(meta)} kcal${finde} · quedan ${fmt(quedan)}` : `de ${fmt(meta)} kcal${finde} · te pasaste ${fmt(-quedan)}`)}
+      ${barra(t.kcal, meta, quedan >= 0 ? "var(--ok)" : "var(--fail)")}
       <p style="margin:14px 0 0;font-size:14.5px"><b>${fmt(t.prot)} g</b> de ${fmt(m.prot)} g de proteína${t.prot >= m.prot ? " ✓" : ` · faltan ${fmt(m.prot - t.prot)} g`}</p>
       ${barra(t.prot, m.prot, t.prot >= m.prot ? "var(--ok)" : "var(--muted)")}</div>`;
   })() : "";
@@ -2348,7 +2441,7 @@ function vComida(){
       <tr><th>Día</th><th>Calorías</th><th>Proteína</th></tr>
       ${dias.map(d => { const x = totalComidas(S.comidas?.[d]); const vacio = !(S.comidas?.[d] || []).length;
         return `<tr class="tap${d === TODAY ? " tr-today" : ""}" data-act="cdia" data-d="${d}"><td>${cap(fechaCorta(d))}</td>
-          <td class="${vacio ? "n" : x.kcal <= m.kcal ? "g" : "y"}">${vacio ? "—" : fmt(x.kcal)}</td>
+          <td class="${vacio ? "n" : x.kcal <= metaDelDia(p, d) ? "g" : "y"}">${vacio ? "—" : fmt(x.kcal)}</td>
           <td class="${vacio ? "n" : x.prot >= m.prot ? "g" : ""}">${vacio ? "—" : fmt(x.prot) + " g"}</td></tr>`; }).join("")}
       </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Tocá un día para ver qué comiste. Verde: calorías dentro de la meta o proteína alcanzada. Amarillo: te pasaste de calorías.</p></div>` : "";
   const cuerpo = m ? `<div class="card"><div class="card-t">Tu meta</div>
@@ -2364,7 +2457,50 @@ function vComida(){
       Cuesta unos 2 a 3 centavos de dólar cada vez (algo menos con texto, algo más con varias fotos) y se cobra en tu cuenta de Anthropic.</p>
     <p style="margin:8px 0 0;font-size:13.5px">${conClave ? "Clave guardada en este celular ✓" : "Falta tu clave de Anthropic (platform.claude.com → Claves de API)."}</p>
     <button class="btn ghost" data-act="cclave">${conClave ? "Cambiar o borrar la clave" : "Cargar clave"}</button></div>`;
-  return alertaComidasHTML() + perfil + resumen + acciones + lista + semana + cuerpo + ia;
+  return alertaComidasHTML() + perfil + resumen + acciones + lista + (m ? gastoHTML(p, m, t) : "") + semana + cuerpo + ia;
+}
+/* Lo que gastaste de verdad hoy (del celular o de Samsung Health) contra lo que comiste,
+   la semana, y si la actividad del perfil no coincide con tu gasto real */
+function gastoHTML(p, m, t){
+  const g = gastoDelDia(S, TODAY), b = balanceSemana(S, TODAY), cal = calibrarActividad(S, TODAY);
+  const partes = !g ? "" : g.fuente === "celular" ? `reposo ${fmt(g.reposo)} + actividad ${fmt(g.activas)} + digestión ${fmt(g.digestion)}`
+    : `Samsung Health ${fmt(g.base)} + digestión ${fmt(g.digestion)}`;
+  const dif = g ? g.total - t.kcal : 0;
+  return `<div class="card gasto-dia"><div class="card-t">Lo que gastás de verdad</div>
+    ${g ? `${heroInner(`${fmt(g.total)} kcal`, `gastaste hoy hasta ahora: ${partes}${g.cinta ? ` + inclinación de la cinta ${fmt(g.cinta)}` : ""}`)}
+      <p class="deficit" style="margin:10px 0 0;font-size:14.5px">${t.kcal ? (dif >= 0 ? `Comiste ${fmt(t.kcal)}: <b>déficit de ${fmt(dif)} kcal</b>.` : `Comiste ${fmt(t.kcal)}: <b>${fmt(-dif)} kcal de más</b>.`)
+        : "Todavía no cargaste comidas hoy."}</p>`
+      : `<p style="margin:0;font-size:14px;line-height:1.5">${NATIVO ? "Todavía no hay calorías del celular de hoy." : "Cargá a la noche el «Total de calorías quemadas» de Samsung Health"} y la app te muestra el déficit real: lo que gastaste contra lo que comiste.</p>`}
+    ${b.dias.length ? `<p class="semana-def" style="margin:8px 0 0;font-size:14.5px">Esta semana (${b.dias.length} ${b.dias.length === 1 ? "día" : "días"} con datos):
+      ${b.deficit >= 0 ? `déficit de <b>${fmt(b.deficit)} kcal</b>, unos ${fmt1(b.kg)} kg` : `<b>${fmt(-b.deficit)} kcal de más</b>`}. Para medio kilo por semana hacen falta unas 3.850.</p>` : ""}
+    ${cal?.distinta ? `<p class="calibrar" style="margin:10px 0 0;font-size:13.5px;line-height:1.5">En los últimos ${cal.dias} días gastaste en promedio <b>${fmt(cal.promedio)} kcal</b>,
+      y tu meta supone ${fmt(m.gasto)}. La actividad que mejor lo explica es <b>${esc(cal.nombre.split(" (")[0])}</b>.
+      <button class="linkbtn" data-act="cact" data-v="${cal.sugerida}" style="padding:0">Usarla</button></p>` : ""}
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
+      <button class="btn ghost" data-act="cgasto" style="margin:0">Cargar de Samsung Health</button>
+      ${NATIVO ? `<button class="btn ghost" data-act="hcCal" style="margin:0">Leer del celular</button>` : `<button class="btn ghost" data-act="irPasos" style="margin:0">Sesión de cinta</button>`}</div>
+    <p class="pie">El celular cuenta pasos: no ve la inclinación de la cinta (eso se suma aparte, desde Pasos) ni la digestión. Son estimaciones; la que confirma es la balanza.</p></div>`;
+}
+/* El total de calorías quemadas de un día, como lo dice Samsung Health (vacío lo saca) */
+function cargarGasto(fecha = TODAY){
+  const g = S.gasto?.[fecha] || {};
+  sheet(`<h3>Calorías quemadas</h3><p class="sub">El «Total de calorías quemadas» de Samsung Health (Actividad diaria), mejor a la noche. Si lo cargás, manda sobre lo que lee el celular.</p>
+    <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
+      <div><label class="campo" for="gTotalSH">Total (kcal)</label><input type="number" id="gTotalSH" inputmode="numeric" min="800" max="8000" value="${g.total ?? ""}"></div>
+      <div><label class="campo" for="gFechaSH">Día</label><input type="date" id="gFechaSH" max="${TODAY}" value="${fecha}"></div></div>
+    <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
+  const $ = q => modal.querySelector(q);
+  $("#gTotalSH").focus();
+  $('[data-x="c"]').onclick = closeSheet;
+  $('[data-x="o"]').onclick = () => {
+    const t = $("#gTotalSH").value.trim(), n = Math.round(Number(t)), d = $("#gFechaSH").value;
+    if(!esFechaValida(d) || d > TODAY){ toast("Elegí un día de hasta hoy"); return; }
+    if(t !== "" && !(n >= 800 && n <= 8000)){ toast("Poné el total entre 800 y 8.000 kcal"); return; }
+    const x = { ...(S.gasto?.[d] || {}) };
+    if(t === "") delete x.total; else x.total = n;
+    if(Object.keys(x).length) (S.gasto ||= {})[d] = x; else if(S.gasto) delete S.gasto[d];
+    save(); closeSheet(); render(); toast(t === "" ? "Sacado" : `${fmt(n)} kcal quemadas el ${fechaCorta(d)}`);
+  };
 }
 /* Una comida en una lista: tocándola se edita; la ✕ la borra */
 function filaComida(c, i, fecha){
@@ -2541,6 +2677,9 @@ function editarPerfil(){
       <div><label class="campo">Peso meta (kg)</label><input type="number" id="pMeta" inputmode="decimal" step="0.1" min="30" max="300" value="${p.pesoMeta ?? ""}"></div></div>
     <label class="campo">Ritmo</label><select id="pRitmo">${op([[0.25, "0,25 kg por semana (suave)"], [0.5, "0,5 kg por semana"], [0.75, "0,75 kg por semana (exigente)"]], p.ritmo ?? 0.5)}</select>
     <label class="campo">Actividad</label><select id="pAct">${op(ACTIVIDAD, p.actividad ?? 1.55)}</select>
+    <label class="campo" for="pFinde">Sábado y domingo (kcal por día, opcional)</label>
+    <input type="number" id="pFinde" inputmode="numeric" min="1200" max="5000" step="50" value="${p.finde ?? ""}" placeholder="Igual que en la semana">
+    <p class="pie" style="margin-top:6px">Si comés más el fin de semana, la diferencia se descuenta de lunes a viernes para que la semana dé lo mismo.</p>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="o"]').onclick = () => {
@@ -2548,10 +2687,14 @@ function editarPerfil(){
     const nuevo = { sexo: modal.querySelector("#pSexo").value, edad: v("#pEdad"), altura: v("#pAltura"), peso: v("#pPeso"),
                     pesoMeta: v("#pMeta"), ritmo: v("#pRitmo"), actividad: v("#pAct") };
     if(!perfilCompleto(nuevo) || nuevo.edad < 14 || nuevo.altura < 120 || nuevo.peso < 30){ toast("Revisá los datos: falta alguno o hay uno raro"); return; }
+    const finde = modal.querySelector("#pFinde").value.trim();
+    if(finde !== ""){ const n = Math.round(Number(finde)); if(!(n >= 1200 && n <= 5000)){ toast("Las del fin de semana, entre 1.200 y 5.000"); return; } nuevo.finde = n; }
+    if(S.perfil?.cintura) nuevo.cintura = S.perfil.cintura;
     if(nuevo.peso !== S.perfil?.peso) (S.pesos ||= {})[TODAY] = nuevo.peso;
     S.perfil = nuevo; save(); closeSheet(); render();
     const m = metasNutricion(nuevo);
-    toast(`Meta: ${fmt(m.kcal)} kcal y ${fmt(m.prot)} g de proteína por día`);
+    toast(nuevo.finde ? `Meta: ${fmt(metaDelDia(nuevo, "2026-11-09"))} kcal de lunes a viernes y ${fmt(nuevo.finde)} el fin de semana`
+      : `Meta: ${fmt(m.kcal)} kcal y ${fmt(m.prot)} g de proteína por día`);
   };
 }
 /* Peso y cintura de hoy. La cintura es opcional: vacía no se registra. */
@@ -3719,6 +3862,12 @@ function onAct(e){
     case "hcAbrir": nativo("HealthPlugin", "openHealthConnectSettings").catch(() => toast("No se pudo abrir Health Connect")); break;
     case "pmeta": editarMetaPasos(); break;
     case "cperfil": editarPerfil(); break;
+    case "cgasto": cargarGasto(); break;
+    case "hcCal": sincronizarPasos(true).then(() => { render(); toast(GASTO_ESTADO || "Calorías del celular leídas"); }); break;
+    case "irPasos": TAB = "pasos"; render(); break;
+    case "cintaAgregar": agregarCinta(); break;
+    case "cintaBorrar": { const l = S.cinta?.[TODAY] || []; l.splice(+el.dataset.i, 1); if(!l.length && S.cinta) delete S.cinta[TODAY]; save(); render(); break; }
+    case "cact": { S.perfil.actividad = +el.dataset.v; save(); render(); toast(`Actividad cambiada: meta ${fmt(metaDelDia(S.perfil, TODAY))} kcal hoy`); break; }
     case "cpeso": registrarPeso(); break;
     case "cmano": comidaAMano(); break;
     case "cfoto": elegirFoto(true); break;
@@ -3968,6 +4117,15 @@ function prepararRespaldo(texto){
       && esNum(f.kcal) && esNum(f.prot) && Object.hasOwn(TIPOS_COMIDA, f.tipo))))
     throw new Error(`El campo "frecuentes" está roto.`);
   if(data.perfil != null && !esObj(data.perfil)) throw new Error(`El campo "perfil" está roto.`);
+  if(data.perfil?.finde != null && !(Number.isFinite(data.perfil.finde) && data.perfil.finde >= 1200 && data.perfil.finde <= 5000))
+    throw new Error(`Las calorías del fin de semana están rotas.`);
+  const kcalOk = x => x == null || (Number.isFinite(x) && x >= 0 && x <= 10000);
+  if(data.gasto != null && !(esObj(data.gasto) && Object.entries(data.gasto).every(([d, g]) => esFecha(d) && esObj(g) && kcalOk(g.activas) && kcalOk(g.total))))
+    throw new Error(`El campo "gasto" está roto.`);
+  const tramoOk = t => t == null || (esObj(t) && t.min > 0 && t.min <= 300 && t.vel >= 1 && t.vel <= 20);
+  if(data.cinta != null && !(esObj(data.cinta) && Object.entries(data.cinta).every(([d, l]) => esFecha(d) && Array.isArray(l)
+      && l.every(x => esObj(x) && Number.isFinite(x.inc) && x.inc >= 0 && x.inc <= 15 && tramoOk(x.cam) && tramoOk(x.tro) && (x.cam || x.tro)))))
+    throw new Error(`El campo "cinta" está roto.`);
   if(data.autoClosed && !Object.values(data.autoClosed).every(Array.isArray))
     throw new Error(`El campo "autoClosed" está roto.`);
   if(data.marcasFin && !Object.entries(data.marcasFin).every(([d, l]) => esFecha(d) && Array.isArray(l)))
@@ -4345,6 +4503,23 @@ async function compartirArchivo(texto, nombre){
    permiso es un error: la primera vez se leen 29 días; después, desde 3 días
    antes del último leído (si eso falla, se vuelve a los últimos 29). */
 const DIAS_HC = 29;
+let GASTO_ESTADO = null;
+/* Las calorías de actividad de los últimos días, como las pasa Samsung Health a Health
+   Connect; lo cargado a mano (el total) manda sobre esto */
+async function leerCalorias(HC){
+  try{
+    const { aggregatedData = [] } = await HC("queryAggregated", { startDate: addDays(new Date(), -7).toISOString(), endDate: new Date().toISOString(),
+      dataType: "active-calories", bucket: "day" });
+    let n = 0;
+    for(const b of aggregatedData){
+      const d = String(b.startDate).slice(0, 10), v = Math.round(Number(b.value));
+      if(!esFechaValida(d) || !(v >= 0 && v < 10000)) continue;
+      (S.gasto ||= {})[d] = { ...(S.gasto[d] || {}), activas: v }; n++;
+    }
+    GASTO_ESTADO = n ? null : "El celular no pasó calorías a Health Connect: cargalas de Samsung Health";
+    if(n) save();
+  }catch(e){ GASTO_ESTADO = "No se pudieron leer las calorías: cargalas de Samsung Health"; }
+}
 function sincronizarPasos(pedirPermiso = false){
   if(!NATIVO) return Promise.resolve();
   if(pasosEnCurso) return pasosEnCurso;
@@ -4364,9 +4539,11 @@ function sincronizarPasos(pedirPermiso = false){
     try{
       const { available } = await HC("isHealthAvailable");
       if(!available){ PASOS_ESTADO = { error: "sin-hc" }; return; }
-      const pedido = { permissions: ["READ_STEPS"] };
+      const pedido = { permissions: ["READ_STEPS", "READ_ACTIVE_CALORIES"] };
       let { permissions } = await HC("checkHealthPermissions", pedido);
-      if(!permissions?.READ_STEPS && pedirPermiso) ({ permissions } = await HC("requestHealthPermissions", pedido));
+      if((!permissions?.READ_STEPS || !permissions?.READ_ACTIVE_CALORIES) && pedirPermiso) ({ permissions } = await HC("requestHealthPermissions", pedido));
+      if(permissions?.READ_ACTIVE_CALORIES) await leerCalorias(HC);
+      else GASTO_ESTADO = "Sin permiso para leer las calorías: cargalas de Samsung Health";
       if(!permissions?.READ_STEPS){ PASOS_ESTADO = { error: "sin-permiso" }; return; }
       const tope = addDays(new Date(), -DIAS_HC), ultimo = S.settings.pasosHasta;
       const desde = ultimo ? addDays(parseISO(ultimo), -3) : tope;
@@ -4667,6 +4844,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS,
   /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes,
+  /* gasto real */ kcalCinta, gastoDelDia, metaDelDia, balanceSemana, calibrarActividad,
   /* caja */ tarjetaDelMes, conciliacionMes, indicadoresMes, deudaNuevaDelMes, cajaDelMes, saldoCuenta, eventosCaja, fechaCobro, rangoMes, mesDeLaPlata };
 </script>
 </body>

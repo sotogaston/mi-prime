@@ -841,7 +841,7 @@ console.log('\n== 29. App de Android: pasos desde Health Connect ==');
   await p.locator('[data-act="hcConectar"]').click(); await p.waitForTimeout(300);
   const pedido = (await llamadas()).find(l => l.metodo === 'requestHealthPermissions');
   const q1 = (await llamadas()).filter(l => l.metodo === 'queryAggregated').at(-1);
-  ok('el botón pide solo leer pasos', JSON.stringify(pedido?.op) === '{"permissions":["READ_STEPS"]}');
+  ok('el botón pide leer pasos y calorías de actividad, nada más', JSON.stringify(pedido?.op) === '{"permissions":["READ_STEPS","READ_ACTIVE_CALORIES"]}');
   const diasAtras = (new Date('2026-10-14T09:00:00') - new Date(q1?.op.startDate)) / 864e5;
   ok(`la primera vez lee desde la medianoche de hace 29 días, dentro de los 30 que deja Health Connect sin permiso de historial (${diasAtras})`,
     q1?.op.dataType === 'steps' && q1.op.bucket === 'day' && q1.op.startDate === await p.evaluate(() => new Date(2026, 8, 15).toISOString()) && diasAtras < 30);
@@ -2247,7 +2247,110 @@ console.log('\n== 45. Transferencias entre cuentas, lo que ya no está en el pla
   await c.close();
 }
 
-console.log('\n== 46. Capturas ==');
+console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, déficit y fin de semana ==');
+{
+  const perfil = { sexo: 'h', edad: 39, altura: 164, peso: 71.2, pesoMeta: 68, ritmo: 0.5, actividad: 1.55 };
+  const L = cargarLogica(estado());
+  ok('la cinta: 6 min caminando a 5 + 15 trotando a 6 con 4 % son unas 183 kcal, 32 por la inclinación; 21 en plano a 5, unas 88',
+    JSON.stringify(L.kcalCinta(71.2, { inc: 4, cam: { min: 6, vel: 5 }, tro: { min: 15, vel: 6 } })) === '{"total":183,"extra":32}'
+    && JSON.stringify(L.kcalCinta(71.2, { inc: 0, cam: { min: 21, vel: 5 } })) === '{"total":88,"extra":0}');
+  const S1 = { perfil, comidas: { '2026-11-06': [{ kcal: 2206, prot: 125 }], '2026-11-07': [{ kcal: 2300, prot: 110 }] },
+    gasto: { '2026-11-06': { total: 1831 }, '2026-11-07': { activas: 642, total: null } }, cinta: { '2026-11-07': [{ id: 'a', inc: 4, cam: { min: 6, vel: 5 }, tro: { min: 15, vel: 6 } }] } };
+  delete S1.gasto['2026-11-07'].total;
+  ok('el gasto del día: lo de Samsung Health a mano más la digestión; o reposo + actividad del celular + digestión + inclinación',
+    L.gastoDelDia(S1, '2026-11-06').total === 2052 && L.gastoDelDia(S1, '2026-11-07').total === 2451 && L.gastoDelDia(S1, '2026-11-05') === null);
+  ok('la semana suma lo comido contra lo gastado en los días con los dos datos', JSON.stringify(L.balanceSemana(S1, '2026-11-07').dias.map(d => d.fecha)) === '["2026-11-06","2026-11-07"]'
+    && L.balanceSemana(S1, '2026-11-07').deficit === -3);
+  ok('con 2.300 el fin de semana, de lunes a viernes 1.670 para que la semana dé lo mismo',
+    L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-09') === 1670 && L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-07') === 2300 && L.metaDelDia(perfil, '2026-11-09') === 1850);
+  const dias = ['2026-11-03','2026-11-04','2026-11-05','2026-11-06','2026-11-07','2026-11-08'];
+  const S2 = { perfil, comidas: Object.fromEntries(dias.map(d => [d, [{ id: 'k' + d.slice(8), nombre: 'Comida', kcal: 2000, prot: 120, tipo: 'almuerzo' }]])),
+    gasto: Object.fromEntries(dias.map(d => [d, { total: 1850 }])) };
+  const cal = L.calibrarActividad(S2, '2026-11-09');
+  ok('con 6 días de gasto real (2.050 por día), la actividad que lo explica es Liviana', cal.promedio === 2050 && cal.sugerida === 1.375 && cal.distinta && cal.dias === 6);
+  ok('con menos de 5 días, no sugiere', L.calibrarActividad({ ...S2, gasto: { '2026-11-08': { total: 1850 } } }, '2026-11-09') === null);
+
+  // En la web
+  const st = { ...estado({ lastClosed: '2026-11-08' }), perfil: { ...perfil, finde: 2300 },
+    comidas: { ...S2.comidas, '2026-11-09': [{ id: 'c1', nombre: 'Almuerzo', kcal: 1000, prot: 60, tipo: 'almuerzo' }] }, gasto: S2.gasto };
+  const { p, c, errs } = await abrirEn('2026-11-09', st);
+  const S = () => p.evaluate(() => window.__prime.S), gasto = () => p.locator('.gasto-dia').innerText();
+  await ir(p, 'comida');
+  ok('el lunes la meta es la de lunes a viernes: 1.670', /1\.000\s+de 1\.670 kcal \(de lunes a viernes\) · quedan 670/.test(await p.locator('.card').first().innerText()));
+  ok('sin dato de hoy, invita a cargar lo de Samsung Health; y sugiere la actividad que explica tu gasto real',
+    /Cargá a la noche el «Total de calorías quemadas» de Samsung Health/.test(await gasto())
+    && /En los últimos 6 días gastaste en promedio 2\.050 kcal,\s+y tu meta supone 2\.398\. La actividad que mejor lo explica es Liviana\./.test(await gasto()));
+  await p.locator('.gasto-dia [data-act="cgasto"]').click(); await p.locator('#gTotalSH').fill('2100'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('cargado el total de Samsung Health: gasto 2.200 (con la digestión) y déficit de 1.200', (await S()).gasto['2026-11-09'].total === 2100
+    && /2\.200 kcal\s+gastaste hoy hasta ahora: Samsung Health 2\.100 \+ digestión 100/.test(await gasto()) && /déficit de 1\.200 kcal/.test(await gasto())
+    && /Esta semana \(1 día con datos\):\s+déficit de 1\.200 kcal/.test(await gasto()));
+  await p.locator('.gasto-dia [data-act="cact"]').click(); await p.waitForTimeout(100);
+  ok('usar la actividad sugerida cambia la meta: con Liviana y 2.300 el finde, de lunes a viernes queda en el piso de 1.500',
+    (await S()).perfil.actividad === 1.375 && /de 1\.500 kcal \(de lunes a viernes\)/.test(await p.locator('.card').first().innerText()));
+  await p.locator('[data-act="cperfil"]').last().click();
+  ok('el perfil tiene las calorías del fin de semana', await p.locator('#pFinde').inputValue() === '2300');
+  await p.locator('#pFinde').fill(''); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
+  ok('vacías, la meta vuelve a ser la misma todos los días', !('finde' in (await S()).perfil) && /de 1\.580 kcal · quedan 580/.test(await p.locator('.card').first().innerText()));
+  // La cinta, desde Pasos
+  await ir(p, 'pasos');
+  ok('Pasos tiene la cinta de hoy', /Sin sesiones hoy/.test(await p.locator('.cinta').innerText()));
+  await p.locator('[data-act="cintaAgregar"]').click();
+  await p.locator('#ciCamMin').fill('6'); await p.locator('#ciCamVel').fill('5'); await p.locator('#ciTroMin').fill('15'); await p.locator('#ciTroVel').fill('6'); await p.locator('#ciInc').fill('4');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('la sesión se ve con sus calorías y lo que suma la inclinación', /6 min caminando a 5 km\/h \+ 15 min trotando a 6 km\/h · 4 % de inclinación\s+unas 183 kcal; 32 por la inclinación, que el celular no ve/.test(await p.locator('.cinta').innerText())
+    && (await S()).settings.cinta.inc === 4);
+  await ir(p, 'comida');
+  ok('y la inclinación suma al gasto del día', /2\.232 kcal\s+gastaste hoy hasta ahora: Samsung Health 2\.100 \+ digestión 100 \+ inclinación de la cinta 32/.test(await gasto()));
+  await ir(p, 'pasos');
+  await p.locator('.cinta [data-act="cintaBorrar"]').click(); await p.waitForTimeout(100);
+  ok('la sesión se saca con la ✕', !(await S()).cinta?.['2026-11-09'] && /Sin sesiones hoy/.test(await p.locator('.cinta').innerText()));
+  const resp = await p.evaluate(() => {
+    const P = window.__prime, base = JSON.parse(JSON.stringify(P.S)), r = [];
+    for (const extra of [{ gasto: { '2026-11-09': { activas: 400 } }, cinta: { '2026-11-09': [{ inc: 4, cam: { min: 20, vel: 5.5 } }] } },
+                         { gasto: { '2026-11-09': { total: 'mucho' } } }, { cinta: { '2026-11-09': [{ inc: 4 }] } }, { cinta: { '2026-11-09': [{ inc: 40, cam: { min: 20, vel: 5 } }] } },
+                         { perfil: { ...base.perfil, finde: 100 } }])
+      try { P.prepararRespaldo(JSON.stringify({ ...base, ...extra })); r.push('ok'); } catch (e) { r.push('no'); }
+    return r.join();
+  });
+  ok('el respaldo trae el gasto, la cinta y el fin de semana, y rechaza lo roto (' + resp + ')', resp === 'ok,no,no,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+{
+  // En la app de Android: las calorías de actividad llegan de Health Connect
+  const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await c.clock.setFixedTime(new Date('2026-11-09T21:00:00'));
+  await c.addInitScript(s => localStorage.setItem('miPrime.v1', s), JSON.stringify({ ...estado({ lastClosed: '2026-11-08' }),
+    perfil: { sexo: 'h', edad: 39, altura: 164, peso: 71.2, pesoMeta: 68, ritmo: 0.5, actividad: 1.55 }, comidas: { '2026-11-09': [{ id: 'c', nombre: 'Cena', kcal: 1800, prot: 120, tipo: 'cena' }] } }));
+  await c.addInitScript(() => {
+    window.__llamadas = [];
+    window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'android',
+      nativePromise: async (plugin, metodo, op = {}) => {
+        window.__llamadas.push({ metodo, op: JSON.parse(JSON.stringify(op)) });
+        if (metodo === 'isHealthAvailable') return { available: true };
+        if (metodo === 'checkHealthPermissions' || metodo === 'requestHealthPermissions') return { permissions: { READ_STEPS: true, READ_ACTIVE_CALORIES: true } };
+        if (metodo === 'queryAggregated' && op.dataType === 'active-calories')
+          return { aggregatedData: [{ startDate: '2026-11-08T00:00:00', value: 420.4 }, { startDate: '2026-11-09T00:00:00', value: 380 }] };
+        if (metodo === 'queryAggregated') return { aggregatedData: [{ startDate: '2026-11-09T00:00:00', value: 9500 }] };
+        if (metodo === 'checkPermissions') return { display: 'granted' };
+        if (metodo === 'getPending') return { notifications: [] };
+        return {};
+      } };
+  });
+  const p = await c.newPage(); p.setDefaultTimeout(5000);
+  const errs = []; p.on('pageerror', e => errs.push(String(e)));
+  await p.goto(URL); await p.waitForTimeout(1200);
+  const S = await p.evaluate(() => window.__prime.S);
+  ok('con permiso, lee las calorías de actividad por día de Health Connect', S.gasto?.['2026-11-08']?.activas === 420 && S.gasto?.['2026-11-09']?.activas === 380
+    && (await p.evaluate(() => window.__llamadas)).some(l => l.metodo === 'queryAggregated' && l.op.dataType === 'active-calories' && l.op.bucket === 'day'));
+  await ir(p, 'comida');
+  ok('y Comida muestra el gasto: reposo 1.547 + actividad 380 + digestión 180 = 2.107; déficit 307', /2\.107 kcal\s+gastaste hoy hasta ahora: reposo 1\.547 \+ actividad 380 \+ digestión 180/.test(await p.locator('.gasto-dia').innerText())
+    && /déficit de 307 kcal/.test(await p.locator('.gasto-dia').innerText()) && await p.locator('.gasto-dia [data-act="hcCal"]').count() === 1);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 47. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
