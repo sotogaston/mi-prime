@@ -216,7 +216,9 @@ compara con lo que comiste:
   celular no cuenta), más lo que suma la **inclinación de la cinta**.
 - **El déficit** del día y el de la semana (de lunes a domingo, en los días con
   los dos datos), y cuánto es en kilos. Para medio kilo por semana hacen falta
-  unas 3.850 kcal.
+  unas 3.850 kcal. Mientras falte comer para llegar a la meta, también dice con
+  qué déficit cierra el día si se llega justo a la meta (con la actividad de
+  hasta ahora), porque el parcial de la tarde engaña.
 - **La actividad del perfil, contra tu gasto real:** con al menos 5 días de datos
   en las últimas 2 semanas, si otra actividad (sedentaria, liviana, moderada o
   intensa) explica mejor lo que gastás, la sugiere y se cambia con un toque, con
@@ -443,7 +445,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                565 pruebas automatizadas (Playwright)
+├── test.mjs                568 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)

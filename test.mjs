@@ -2259,6 +2259,12 @@ console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, d�
   delete S1.gasto['2026-11-07'].total;
   ok('el gasto del día: lo de Samsung Health a mano más la digestión; o reposo + actividad del celular + digestión + inclinación',
     L.gastoDelDia(S1, '2026-11-06').total === 2052 && L.gastoDelDia(S1, '2026-11-07').total === 2451 && L.gastoDelDia(S1, '2026-11-05') === null);
+  const S3 = { perfil, comidas: { '2026-11-08': [{ kcal: 935, prot: 92 }] }, gasto: { '2026-11-08': { activas: 394 } } };
+  ok('a media tarde: gasto 2.035 y déficit parcial de 1.100; si llega a la meta de 1.850, cierra con unas 276 de déficit',
+    L.gastoDelDia(S3, '2026-11-08').total === 2035 && JSON.stringify(L.deficitAlCerrar(S3, '2026-11-08')) === '{"meta":1850,"gasto":2126,"deficit":276}');
+  ok('con 2.300 el domingo, cerraría con 129 de más; si ya comió la meta, no hay proyección',
+    L.deficitAlCerrar({ ...S3, perfil: { ...perfil, finde: 2300 } }, '2026-11-08').deficit === -129
+    && L.deficitAlCerrar({ ...S3, comidas: { '2026-11-08': [{ kcal: 1900, prot: 1 }] } }, '2026-11-08') === null);
   ok('la semana suma lo comido contra lo gastado en los días con los dos datos', JSON.stringify(L.balanceSemana(S1, '2026-11-07').dias.map(d => d.fecha)) === '["2026-11-06","2026-11-07"]'
     && L.balanceSemana(S1, '2026-11-07').deficit === -3);
   ok('con 2.300 el fin de semana, de lunes a viernes sigue en 1.850 y el ritmo baja a 0,38 kg por semana',
@@ -2285,7 +2291,8 @@ console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, d�
     && /En los últimos 6 días gastaste en promedio 2\.050 kcal,\s+y tu meta supone 2\.398\. La actividad que mejor lo explica es Liviana: con ella y 0,25 kg por semana\s+seguís comiendo 1\.850 kcal/.test(await gasto()));
   await p.locator('.gasto-dia [data-act="cgasto"]').click(); await p.locator('#gTotalSH').fill('2100'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('cargado el total de Samsung Health: gasto 2.200 (con la digestión) y déficit de 1.200', (await S()).gasto['2026-11-09'].total === 2100
-    && /2\.200 kcal\s+gastaste hoy hasta ahora: Samsung Health 2\.100 \+ digestión 100/.test(await gasto()) && /déficit de 1\.200 kcal/.test(await gasto())
+    && /2\.200 kcal\s+gastaste hoy hasta ahora: Samsung Health 2\.100 \+ digestión 100/.test(await gasto()) && /déficit de 1\.200 kcal por ahora/.test(await gasto())
+    && /Si a la noche llegás a tu meta de 1\.850 kcal, el día cierra con un déficit de unos 435 kcal \(con lo que te moviste hasta ahora\)/.test(await gasto())
     && /Esta semana \(1 día con datos\):\s+déficit de 1\.200 kcal/.test(await gasto()));
   await p.locator('.gasto-dia [data-act="cact"]').click(); await p.waitForTimeout(100);
   ok('usar la actividad sugerida no cambia las calorías: Liviana, 0,25 kg por semana y sigue en 1.850',
