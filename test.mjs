@@ -2261,13 +2261,15 @@ console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, d�
     L.gastoDelDia(S1, '2026-11-06').total === 2052 && L.gastoDelDia(S1, '2026-11-07').total === 2451 && L.gastoDelDia(S1, '2026-11-05') === null);
   ok('la semana suma lo comido contra lo gastado en los días con los dos datos', JSON.stringify(L.balanceSemana(S1, '2026-11-07').dias.map(d => d.fecha)) === '["2026-11-06","2026-11-07"]'
     && L.balanceSemana(S1, '2026-11-07').deficit === -3);
-  ok('con 2.300 el fin de semana, de lunes a viernes 1.670 para que la semana dé lo mismo',
-    L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-09') === 1670 && L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-07') === 2300 && L.metaDelDia(perfil, '2026-11-09') === 1850);
+  ok('con 2.300 el fin de semana, de lunes a viernes sigue en 1.850 y el ritmo baja a 0,38 kg por semana',
+    L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-09') === 1850 && L.metaDelDia({ ...perfil, finde: 2300 }, '2026-11-07') === 2300 && L.metaDelDia(perfil, '2026-11-09') === 1850
+    && L.ritmoReal({ ...perfil, finde: 2300 }) === 0.38 && L.ritmoReal(perfil) === 0.5);
   const dias = ['2026-11-03','2026-11-04','2026-11-05','2026-11-06','2026-11-07','2026-11-08'];
   const S2 = { perfil, comidas: Object.fromEntries(dias.map(d => [d, [{ id: 'k' + d.slice(8), nombre: 'Comida', kcal: 2000, prot: 120, tipo: 'almuerzo' }]])),
     gasto: Object.fromEntries(dias.map(d => [d, { total: 1850 }])) };
   const cal = L.calibrarActividad(S2, '2026-11-09');
-  ok('con 6 días de gasto real (2.050 por día), la actividad que lo explica es Liviana', cal.promedio === 2050 && cal.sugerida === 1.375 && cal.distinta && cal.dias === 6);
+  ok('con 6 días de gasto real (2.050 por día), la actividad que lo explica es Liviana; con 0,25 kg por semana sigue en 1.850', cal.promedio === 2050 && cal.sugerida === 1.375
+    && cal.distinta && cal.dias === 6 && cal.ritmo === 0.25 && cal.kcal === 1850);
   ok('con menos de 5 días, no sugiere', L.calibrarActividad({ ...S2, gasto: { '2026-11-08': { total: 1850 } } }, '2026-11-09') === null);
 
   // En la web
@@ -2276,21 +2278,22 @@ console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, d�
   const { p, c, errs } = await abrirEn('2026-11-09', st);
   const S = () => p.evaluate(() => window.__prime.S), gasto = () => p.locator('.gasto-dia').innerText();
   await ir(p, 'comida');
-  ok('el lunes la meta es la de lunes a viernes: 1.670', /1\.000\s+de 1\.670 kcal \(de lunes a viernes\) · quedan 670/.test(await p.locator('.card').first().innerText()));
+  ok('el lunes la meta es la de siempre: 1.850', /1\.000\s+de 1\.850 kcal \(de lunes a viernes\) · quedan 850/.test(await p.locator('.card').first().innerText()));
+  ok('Tu meta dice el ritmo con el fin de semana: unos 0,38 kg por semana', /Con 1\.850 kcal de lunes a viernes y 2\.300 el fin de semana, bajás unos 0,38 kg por semana \(≈ 9 semanas\)/.test(await p.locator('#view').innerText()));
   ok('sin dato de hoy, invita a cargar lo de Samsung Health; y sugiere la actividad que explica tu gasto real',
     /Cargá a la noche el «Total de calorías quemadas» de Samsung Health/.test(await gasto())
-    && /En los últimos 6 días gastaste en promedio 2\.050 kcal,\s+y tu meta supone 2\.398\. La actividad que mejor lo explica es Liviana\./.test(await gasto()));
+    && /En los últimos 6 días gastaste en promedio 2\.050 kcal,\s+y tu meta supone 2\.398\. La actividad que mejor lo explica es Liviana: con ella y 0,25 kg por semana\s+seguís comiendo 1\.850 kcal/.test(await gasto()));
   await p.locator('.gasto-dia [data-act="cgasto"]').click(); await p.locator('#gTotalSH').fill('2100'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
   ok('cargado el total de Samsung Health: gasto 2.200 (con la digestión) y déficit de 1.200', (await S()).gasto['2026-11-09'].total === 2100
     && /2\.200 kcal\s+gastaste hoy hasta ahora: Samsung Health 2\.100 \+ digestión 100/.test(await gasto()) && /déficit de 1\.200 kcal/.test(await gasto())
     && /Esta semana \(1 día con datos\):\s+déficit de 1\.200 kcal/.test(await gasto()));
   await p.locator('.gasto-dia [data-act="cact"]').click(); await p.waitForTimeout(100);
-  ok('usar la actividad sugerida cambia la meta: con Liviana y 2.300 el finde, de lunes a viernes queda en el piso de 1.500',
-    (await S()).perfil.actividad === 1.375 && /de 1\.500 kcal \(de lunes a viernes\)/.test(await p.locator('.card').first().innerText()));
+  ok('usar la actividad sugerida no cambia las calorías: Liviana, 0,25 kg por semana y sigue en 1.850',
+    (await S()).perfil.actividad === 1.375 && (await S()).perfil.ritmo === 0.25 && /de 1\.850 kcal \(de lunes a viernes\)/.test(await p.locator('.card').first().innerText()));
   await p.locator('[data-act="cperfil"]').last().click();
   ok('el perfil tiene las calorías del fin de semana', await p.locator('#pFinde').inputValue() === '2300');
   await p.locator('#pFinde').fill(''); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(100);
-  ok('vacías, la meta vuelve a ser la misma todos los días', !('finde' in (await S()).perfil) && /de 1\.580 kcal · quedan 580/.test(await p.locator('.card').first().innerText()));
+  ok('vacías, la meta es la misma todos los días', !('finde' in (await S()).perfil) && /de 1\.850 kcal · quedan 850/.test(await p.locator('.card').first().innerText()));
   // La cinta, desde Pasos
   await ir(p, 'pasos');
   ok('Pasos tiene la cinta de hoy', /Sin sesiones hoy/.test(await p.locator('.cinta').innerText()));

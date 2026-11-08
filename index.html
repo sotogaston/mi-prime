@@ -985,15 +985,19 @@ function gastoDelDia(S, ds){
   if(g.activas != null) return { fuente: "celular", reposo: m.tmb, activas: g.activas, digestion, cinta, total: m.tmb + g.activas + digestion + cinta };
   return null;
 }
-/* La meta de calorías del día: con calorías propias para el fin de semana (perfil.finde),
-   lo que se come de más el sábado y el domingo se descuenta de lunes a viernes, para que
-   la semana dé lo mismo */
+/* La meta de calorías del día: de lunes a viernes la de siempre; con calorías propias
+   para el fin de semana (perfil.finde), el sábado y el domingo esas. No se descuenta de
+   la semana: lo que cambia es el ritmo, que ritmoReal dice cuál queda. */
 function metaDelDia(p, ds){
   const m = metasNutricion(p); if(!m) return null;
-  if(!(p.finde > 0)) return m.kcal;
   const dia = parseISO(ds).getDay();
-  if(dia === 0 || dia === 6) return p.finde;
-  return Math.max(p.sexo === "h" ? 1500 : 1200, Math.round((m.kcal * 7 - p.finde * 2) / 5 / 10) * 10);
+  return p.finde > 0 && (dia === 0 || dia === 6) ? p.finde : m.kcal;
+}
+/* Los kilos por semana que dan la meta de lunes a viernes y la del fin de semana juntas */
+function ritmoReal(p){
+  const m = metasNutricion(p); if(!m) return null;
+  const semana = m.deficit * 7 - (p.finde > 0 ? 2 * (p.finde - m.kcal) : 0);
+  return Math.round(semana / 7700 * 100) / 100;
 }
 /* La semana de lunes a domingo hasta ds: lo comido contra lo gastado en los días con los dos datos */
 function balanceSemana(S, ds){
@@ -1013,7 +1017,12 @@ function calibrarActividad(S, hoy){
   if(dias.length < 5) return null;
   const promedio = Math.round(suma(dias, g => g.total) / dias.length), factor = promedio / m.tmb;
   const [sugerida, nombre] = ACTIVIDAD.reduce((a, b) => Math.abs(b[0] - factor) < Math.abs(a[0] - factor) ? b : a);
-  return { dias: dias.length, promedio, factor: Math.round(factor * 100) / 100, sugerida, nombre, actual: S.perfil.actividad, distinta: sugerida !== S.perfil.actividad };
+  // el ritmo que, con esa actividad, deja las calorías lo más cerca posible de las de hoy
+  const ritmo = [0.25, 0.5, 0.75].reduce((a, r) => Math.abs(metasNutricion({ ...S.perfil, actividad: sugerida, ritmo: r }).kcal - m.kcal)
+    < Math.abs(metasNutricion({ ...S.perfil, actividad: sugerida, ritmo: a }).kcal - m.kcal) ? r : a);
+  const nueva = metasNutricion({ ...S.perfil, actividad: sugerida, ritmo });
+  return { dias: dias.length, promedio, factor: Math.round(factor * 100) / 100, sugerida, nombre, ritmo, kcal: nueva.kcal,
+           actual: S.perfil.actividad, distinta: sugerida !== S.perfil.actividad };
 }
 function perfilCompleto(p){
   return !!p && (p.sexo === "h" || p.sexo === "m") && [p.edad, p.altura, p.peso, p.pesoMeta, p.ritmo, p.actividad]
@@ -2446,9 +2455,11 @@ function vComida(){
       </table><p style="font-size:12px;color:var(--muted);margin:8px 0 0">Tocá un día para ver qué comiste. Verde: calorías dentro de la meta o proteína alcanzada. Amarillo: te pasaste de calorías.</p></div>` : "";
   const cuerpo = m ? `<div class="card"><div class="card-t">Tu meta</div>
       <p style="margin:0;font-size:14.5px;line-height:1.55"><b>${fmt1(p.peso)} kg</b> → ${fmt1(p.pesoMeta)} kg
-        ${m.faltan ? `· faltan ${fmt1(m.faltan)} kg (≈ ${m.semanas} ${m.semanas === 1 ? "semana" : "semanas"} a ${fmt1(p.ritmo)} kg por semana)` : "· ¡llegaste! La meta es mantener"}</p>
+        ${!m.faltan ? "· ¡llegaste! La meta es mantener" : (() => { const r = ritmoReal(p), sem = r > 0 ? Math.ceil(m.faltan / r) : null;
+          return p.finde > 0 ? `· faltan ${fmt1(m.faltan)} kg. Con ${fmt(m.kcal)} kcal de lunes a viernes y ${fmt(p.finde)} el fin de semana, bajás unos <b>${fmtKg(r)} kg por semana</b>${sem ? ` (≈ ${sem} semanas)` : ""}`
+            : `· faltan ${fmt1(m.faltan)} kg (≈ ${m.semanas} ${m.semanas === 1 ? "semana" : "semanas"} a ${fmtKg(p.ritmo)} kg por semana)`; })()}</p>
       ${lineaCintura(p)}
-      <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.5">Gastás unas ${fmt(m.gasto)} kcal por día (base ${fmt(m.tmb)}, Mifflin-St Jeor por tu actividad)${m.deficit ? `; para bajar ${fmt1(p.ritmo)} kg por semana comés ${fmt(m.deficit)} menos` : ""}. Proteína: 1,8 g por kilo. Son estimaciones: si en 2 o 3 semanas el peso no se mueve, bajá un poco la meta.</p>
+      <p style="margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.5">Gastás unas ${fmt(m.gasto)} kcal por día (base ${fmt(m.tmb)}, Mifflin-St Jeor por tu actividad)${m.deficit ? `; para bajar ${fmtKg(p.ritmo)} kg por semana comés ${fmt(m.deficit)} menos` : ""}. Proteína: 1,8 g por kilo. Son estimaciones: si en 2 o 3 semanas el peso no se mueve, bajá un poco la meta.</p>
       <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
         <button class="btn ghost" data-act="cpeso" style="margin:0">Registrar medidas</button>
         <button class="btn ghost" data-act="cperfil" style="margin:0">Editar perfil</button></div></div>` : "";
@@ -2474,8 +2485,9 @@ function gastoHTML(p, m, t){
     ${b.dias.length ? `<p class="semana-def" style="margin:8px 0 0;font-size:14.5px">Esta semana (${b.dias.length} ${b.dias.length === 1 ? "día" : "días"} con datos):
       ${b.deficit >= 0 ? `déficit de <b>${fmt(b.deficit)} kcal</b>, unos ${fmt1(b.kg)} kg` : `<b>${fmt(-b.deficit)} kcal de más</b>`}. Para medio kilo por semana hacen falta unas 3.850.</p>` : ""}
     ${cal?.distinta ? `<p class="calibrar" style="margin:10px 0 0;font-size:13.5px;line-height:1.5">En los últimos ${cal.dias} días gastaste en promedio <b>${fmt(cal.promedio)} kcal</b>,
-      y tu meta supone ${fmt(m.gasto)}. La actividad que mejor lo explica es <b>${esc(cal.nombre.split(" (")[0])}</b>.
-      <button class="linkbtn" data-act="cact" data-v="${cal.sugerida}" style="padding:0">Usarla</button></p>` : ""}
+      y tu meta supone ${fmt(m.gasto)}. La actividad que mejor lo explica es <b>${esc(cal.nombre.split(" (")[0])}</b>: con ella y ${fmtKg(cal.ritmo)} kg por semana
+      seguís comiendo ${fmt(cal.kcal)} kcal, con una estimación real de cuánto bajás.
+      <button class="linkbtn" data-act="cact" data-v="${cal.sugerida}" data-r="${cal.ritmo}" style="padding:0">Usarla</button></p>` : ""}
     <div class="row2" style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px">
       <button class="btn ghost" data-act="cgasto" style="margin:0">Cargar de Samsung Health</button>
       ${NATIVO ? `<button class="btn ghost" data-act="hcCal" style="margin:0">Leer del celular</button>` : `<button class="btn ghost" data-act="irPasos" style="margin:0">Sesión de cinta</button>`}</div>
@@ -2679,7 +2691,7 @@ function editarPerfil(){
     <label class="campo">Actividad</label><select id="pAct">${op(ACTIVIDAD, p.actividad ?? 1.55)}</select>
     <label class="campo" for="pFinde">Sábado y domingo (kcal por día, opcional)</label>
     <input type="number" id="pFinde" inputmode="numeric" min="1200" max="5000" step="50" value="${p.finde ?? ""}" placeholder="Igual que en la semana">
-    <p class="pie" style="margin-top:6px">Si comés más el fin de semana, la diferencia se descuenta de lunes a viernes para que la semana dé lo mismo.</p>
+    <p class="pie" style="margin-top:6px">De lunes a viernes sigue la meta de siempre; lo de más del fin de semana baja un poco el ritmo, y la app te dice cuánto.</p>
     <div class="row2"><button class="btn ghost" data-x="c">Cancelar</button><button class="btn" data-x="o">Guardar</button></div>`);
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="o"]').onclick = () => {
@@ -2693,7 +2705,7 @@ function editarPerfil(){
     if(nuevo.peso !== S.perfil?.peso) (S.pesos ||= {})[TODAY] = nuevo.peso;
     S.perfil = nuevo; save(); closeSheet(); render();
     const m = metasNutricion(nuevo);
-    toast(nuevo.finde ? `Meta: ${fmt(metaDelDia(nuevo, "2026-11-09"))} kcal de lunes a viernes y ${fmt(nuevo.finde)} el fin de semana`
+    toast(nuevo.finde ? `Meta: ${fmt(m.kcal)} kcal de lunes a viernes y ${fmt(nuevo.finde)} el fin de semana · unos ${fmtKg(ritmoReal(nuevo))} kg por semana`
       : `Meta: ${fmt(m.kcal)} kcal y ${fmt(m.prot)} g de proteína por día`);
   };
 }
@@ -2770,6 +2782,7 @@ function fin(){
 function aPesos(n){ return (n < 0 ? "− $ " : "$ ") + fmt(Math.abs(Math.round(n))); }
 function conSigno(n){ return (n < 0 ? "− $ " : n > 0 ? "+ $ " : "$ ") + fmt(Math.abs(Math.round(n))); }
 function enMillones(n, signo){ return (n < 0 ? "−" : signo && n > 0 ? "+" : "") + (Math.abs(n) / 1e6).toLocaleString("es-AR", { maximumFractionDigits: 2 }); }
+const fmtKg = n => Number(n).toLocaleString("es-AR", { maximumFractionDigits: 2 });   // 0,38 kg por semana
 function nombreMes(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES[m - 1]} ${y}`; }
 function mesCorto(mes){ const [y, m] = mes.split("-").map(Number); return `${MESES_CORTOS[m - 1]} ${String(y).slice(2)}`; }
 function diaYMes(ds){ const d = parseISO(ds); return `${d.getDate()}/${d.getMonth() + 1}`; }
@@ -3867,7 +3880,8 @@ function onAct(e){
     case "irPasos": TAB = "pasos"; render(); break;
     case "cintaAgregar": agregarCinta(); break;
     case "cintaBorrar": { const l = S.cinta?.[TODAY] || []; l.splice(+el.dataset.i, 1); if(!l.length && S.cinta) delete S.cinta[TODAY]; save(); render(); break; }
-    case "cact": { S.perfil.actividad = +el.dataset.v; save(); render(); toast(`Actividad cambiada: meta ${fmt(metaDelDia(S.perfil, TODAY))} kcal hoy`); break; }
+    case "cact": { S.perfil.actividad = +el.dataset.v; S.perfil.ritmo = +el.dataset.r; save(); render();
+      toast(`Actividad ${ACTIVIDAD.find(a => a[0] === S.perfil.actividad)[1].split(" (")[0].toLowerCase()}: ${fmt(metasNutricion(S.perfil).kcal)} kcal, unos ${fmtKg(ritmoReal(S.perfil))} kg por semana`); break; }
     case "cpeso": registrarPeso(); break;
     case "cmano": comidaAMano(); break;
     case "cfoto": elegirFoto(true); break;
@@ -4844,7 +4858,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS,
   /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes,
-  /* gasto real */ kcalCinta, gastoDelDia, metaDelDia, balanceSemana, calibrarActividad,
+  /* gasto real */ kcalCinta, gastoDelDia, metaDelDia, ritmoReal, balanceSemana, calibrarActividad,
   /* caja */ tarjetaDelMes, conciliacionMes, indicadoresMes, deudaNuevaDelMes, cajaDelMes, saldoCuenta, eventosCaja, fechaCobro, rangoMes, mesDeLaPlata };
 </script>
 </body>

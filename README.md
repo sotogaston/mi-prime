@@ -219,10 +219,13 @@ compara con lo que comiste:
   unas 3.850 kcal.
 - **La actividad del perfil, contra tu gasto real:** con al menos 5 días de datos
   en las últimas 2 semanas, si otra actividad (sedentaria, liviana, moderada o
-  intensa) explica mejor lo que gastás, la sugiere y se cambia con un toque.
+  intensa) explica mejor lo que gastás, la sugiere y se cambia con un toque, con
+  el ritmo que deja las calorías como están: lo que cambia es la estimación de
+  cuánto se baja, que pasa a ser real.
 - **El fin de semana:** en el perfil se pueden poner calorías propias para el
-  sábado y el domingo; lo de más se descuenta de lunes a viernes para que la
-  semana dé lo mismo (con un piso de 1.500 kcal para hombres y 1.200 para mujeres).
+  sábado y el domingo. De lunes a viernes sigue la meta de siempre; *Tu meta*
+  dice el ritmo que da la semana entera (por ejemplo, 1.850 de lunes a viernes y
+  2.300 el fin de semana: unos 0,38 kg por semana en vez de 0,5).
 
 En **Pasos**, la **cinta**: cada sesión con los minutos caminando y trotando, su
 velocidad y la inclinación. Calcula las calorías con las fórmulas del ACSM
