@@ -204,6 +204,36 @@ analizar la primera foto.
 
 ---
 
+## Lo que gastás de verdad
+
+En **Comida**, la tarjeta *Lo que gastás de verdad* junta el gasto del día y lo
+compara con lo que comiste:
+
+- **El gasto:** el reposo (Mifflin-St Jeor), más las **calorías de actividad**
+  que el celular pasa a Health Connect (con su permiso; en la web, o si Samsung
+  Health no las pasa, se carga a mano el *Total de calorías quemadas* de Samsung
+  Health, que manda), más la **digestión** (un 10 % de lo que comiste, que el
+  celular no cuenta), más lo que suma la **inclinación de la cinta**.
+- **El déficit** del día y el de la semana (de lunes a domingo, en los días con
+  los dos datos), y cuánto es en kilos. Para medio kilo por semana hacen falta
+  unas 3.850 kcal.
+- **La actividad del perfil, contra tu gasto real:** con al menos 5 días de datos
+  en las últimas 2 semanas, si otra actividad (sedentaria, liviana, moderada o
+  intensa) explica mejor lo que gastás, la sugiere y se cambia con un toque, con
+  el ritmo que deja las calorías como están: lo que cambia es la estimación de
+  cuánto se baja, que pasa a ser real.
+- **El fin de semana:** en el perfil se pueden poner calorías propias para el
+  sábado y el domingo. De lunes a viernes sigue la meta de siempre; *Tu meta*
+  dice el ritmo que da la semana entera (por ejemplo, 1.850 de lunes a viernes y
+  2.300 el fin de semana: unos 0,38 kg por semana en vez de 0,5).
+
+En **Pasos**, la **cinta**: cada sesión con los minutos caminando y trotando, su
+velocidad y la inclinación. Calcula las calorías con las fórmulas del ACSM
+(caminar 0,1·v + 1,8·v·i + 3,5; trotar 0,2·v + 0,9·v·i + 3,5 ml/kg/min) y suma al
+gasto solo lo de la inclinación, que el celular no ve porque cuenta pasos.
+
+---
+
 ## Finanzas
 
 La pestaña **Finanzas** lleva la plata del mes con la misma idea que los
@@ -388,7 +418,8 @@ no se puede mejorar. Arriba, ‹ › para ver otros meses.
 - **Semanas** — la planilla semanal: un hábito por vez en bloques 1-7 / 8-14 /
   15-21 / 22-28 / últimos días, cada uno con su VIC y DER, más el total del mes.
 - **Pasos** — pasos por día, semana, mes y año, con totales y promedios.
-- **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste.
+- **Comida** — calorías y proteínas del día contra la meta, por foto o escribiendo lo que comiste;
+  lo que gastás de verdad y el déficit del día y de la semana.
 - **Gastos** — la administración de los gastos: presupuesto por categoría,
   necesidad o gusto, con qué pagaste, los movimientos, dónde se va la plata, el
   cierre del mes y cómo vamos en gráficos y estadísticas.
@@ -412,7 +443,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                544 pruebas automatizadas (Playwright)
+├── test.mjs                565 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
