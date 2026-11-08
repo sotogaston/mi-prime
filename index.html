@@ -999,6 +999,14 @@ function ritmoReal(p){
   const semana = m.deficit * 7 - (p.finde > 0 ? 2 * (p.finde - m.kcal) : 0);
   return Math.round(semana / 7700 * 100) / 100;
 }
+/* Durante el día, el déficit parcial engaña (todavía falta comer): si se llega justo a la
+   meta, cuánto queda con la actividad de hasta ahora (y la digestión de comer la meta) */
+function deficitAlCerrar(S, ds){
+  const g = gastoDelDia(S, ds), meta = metaDelDia(S?.perfil, ds), c = totalComidas(S?.comidas?.[ds]).kcal;
+  if(!g || !meta || c >= meta) return null;
+  const gasto = g.total - g.digestion + Math.round(meta * 0.1);
+  return { meta, gasto, deficit: gasto - meta };
+}
 /* La semana de lunes a domingo hasta ds: lo comido contra lo gastado en los días con los dos datos */
 function balanceSemana(S, ds){
   const d = parseISO(ds), lunes = addDays(d, -((d.getDay() + 6) % 7)), dias = [];
@@ -2473,14 +2481,16 @@ function vComida(){
 /* Lo que gastaste de verdad hoy (del celular o de Samsung Health) contra lo que comiste,
    la semana, y si la actividad del perfil no coincide con tu gasto real */
 function gastoHTML(p, m, t){
-  const g = gastoDelDia(S, TODAY), b = balanceSemana(S, TODAY), cal = calibrarActividad(S, TODAY);
+  const g = gastoDelDia(S, TODAY), b = balanceSemana(S, TODAY), cal = calibrarActividad(S, TODAY), cierre = deficitAlCerrar(S, TODAY);
   const partes = !g ? "" : g.fuente === "celular" ? `reposo ${fmt(g.reposo)} + actividad ${fmt(g.activas)} + digestión ${fmt(g.digestion)}`
     : `Samsung Health ${fmt(g.base)} + digestión ${fmt(g.digestion)}`;
   const dif = g ? g.total - t.kcal : 0;
   return `<div class="card gasto-dia"><div class="card-t">Lo que gastás de verdad</div>
     ${g ? `${heroInner(`${fmt(g.total)} kcal`, `gastaste hoy hasta ahora: ${partes}${g.cinta ? ` + inclinación de la cinta ${fmt(g.cinta)}` : ""}`)}
-      <p class="deficit" style="margin:10px 0 0;font-size:14.5px">${t.kcal ? (dif >= 0 ? `Comiste ${fmt(t.kcal)}: <b>déficit de ${fmt(dif)} kcal</b>.` : `Comiste ${fmt(t.kcal)}: <b>${fmt(-dif)} kcal de más</b>.`)
-        : "Todavía no cargaste comidas hoy."}</p>`
+      <p class="deficit" style="margin:10px 0 0;font-size:14.5px">${t.kcal ? (dif >= 0 ? `Comiste ${fmt(t.kcal)}: <b>déficit de ${fmt(dif)} kcal</b>${cierre ? " por ahora" : ""}.` : `Comiste ${fmt(t.kcal)}: <b>${fmt(-dif)} kcal de más</b>.`)
+        : "Todavía no cargaste comidas hoy."}</p>
+      ${cierre ? `<p class="al-cerrar" style="margin:6px 0 0;font-size:14.5px">Si a la noche llegás a tu meta de ${fmt(cierre.meta)} kcal, el día cierra con ${cierre.deficit >= 0
+        ? `un <b>déficit de unos ${fmt(cierre.deficit)} kcal</b>` : `<b>unas ${fmt(-cierre.deficit)} kcal de más</b>`} (con lo que te moviste hasta ahora).</p>` : ""}`
       : `<p style="margin:0;font-size:14px;line-height:1.5">${NATIVO ? "Todavía no hay calorías del celular de hoy." : "Cargá a la noche el «Total de calorías quemadas» de Samsung Health"} y la app te muestra el déficit real: lo que gastaste contra lo que comiste.</p>`}
     ${b.dias.length ? `<p class="semana-def" style="margin:8px 0 0;font-size:14.5px">Esta semana (${b.dias.length} ${b.dias.length === 1 ? "día" : "días"} con datos):
       ${b.deficit >= 0 ? `déficit de <b>${fmt(b.deficit)} kcal</b>, unos ${fmt1(b.kg)} kg` : `<b>${fmt(-b.deficit)} kcal de más</b>`}. Para medio kilo por semana hacen falta unas 3.850.</p>` : ""}
@@ -4858,7 +4868,7 @@ window.__prime = { get S(){ return S; }, set S(v){ S = v; }, render, applyMark, 
   /* finanzas */ resumenMes, proyeccionFinanzas, hitosColchon, vencimientos, planAvisoVencimientos, normalizarTicket, validarFinanzas, finanzasImportadas,
   /* hábitos de finanzas */ marcarPorFinanzas, estadoFinanzas, rumboFinanzas, fraseFinanzas, HABITOS_FINANZAS,
   /* gastos */ analisisGastos, rubroDe, CATEGORIAS_GASTO, estadisticasGastos, sobresDelMes, presupuestosIniciales, totalesPorMes,
-  /* gasto real */ kcalCinta, gastoDelDia, metaDelDia, ritmoReal, balanceSemana, calibrarActividad,
+  /* gasto real */ kcalCinta, gastoDelDia, metaDelDia, ritmoReal, balanceSemana, calibrarActividad, deficitAlCerrar,
   /* caja */ tarjetaDelMes, conciliacionMes, indicadoresMes, deudaNuevaDelMes, cajaDelMes, saldoCuenta, eventosCaja, fechaCobro, rangoMes, mesDeLaPlata };
 </script>
 </body>
