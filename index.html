@@ -1333,7 +1333,7 @@ function loQueSeCocina(S){
      inicio: "2026-11",               primer mes del plan: antes no se cuenta ni se avisa nada
      presupuestoAlimentos: 600000,
      ingresos:    [{ id, nombre, monto, dia?, meses? }]    meses: [6, 12] para el aguinaldo; sin meses, todos
-     fijos:       [{ id, nombre, monto, dia? }]            lo de la casa que se paga todos los meses
+     fijos:       [{ id, nombre, monto, dia?, plan? }]     lo de la casa que se paga todos los meses; plan: { "2026-11": 100000 } si un mes es distinto
      deudas:      [{ id, nombre, saldo, cuota, tna?, dia?, hasta?, plan? }]   plan: { "2026-11": 527360 } si una cuota es distinta
      movimientos: [{ id, mes, nombre, monto }]             lo de un solo mes: + entra (un adelanto), − sale (su descuento)
      colchon:     [{ id, nombre, monto }]                  lo ahorrado, hoy
@@ -1353,6 +1353,10 @@ function sumarMeses(mes, n){ const [y, m] = mes.split("-").map(Number); return i
 /* El día de pago dentro del mes: el 31 en noviembre cae el 30 */
 function fechaDelMes(mes, dia){ const [y, m] = mes.split("-").map(Number); return iso(new Date(y, m - 1, Math.min(dia, daysInMonth(y, m - 1)))); }
 function cuotaDelMes(d, mes){ return d.hasta && mes > d.hasta ? 0 : d.plan?.[mes] ?? d.cuota ?? 0; }
+function fijoDelMes(f, mes){ return f.plan?.[mes] ?? f.monto ?? 0; }
+/* Una deuda termina cuando pasa su última cuota o cuando esa cuota ya se marcó pagada:
+   desde ahí no se debe más, aunque el saldo cargado siga siendo el de antes */
+function deudaTerminada(F, d, mes){ return !!d.hasta && (d.hasta < mes || (F?.pagos?.[d.hasta] || []).includes("d:" + d.id)); }
 function ingresoDelMes(i, mes){ return !i.meses?.length || i.meses.includes(Number(mes.slice(5))) ? i.monto || 0 : 0; }
 /* Presupuesto del mes por categoría: S.finanzas.presupuestos = { super: 300000, … }.
    El de un rubro es la suma de sus categorías. Mientras no haya presupuestos por
@@ -1442,7 +1446,7 @@ function resumenMes(F, mes, hoy){
   const movimientos = (F?.movimientos || []).filter(m => m.mes === mes);
   const presupuesto = presupuestoAlimentos(F), gastado = gastadoEnMes(F, mes, "alimentos");
   const presupuestoG = presupuestoGastos(F), gastadoG = gastadoEnMes(F, mes, "gastos");
-  const casa = suma(F?.fijos, f => f.monto), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes)), pasado = mes < mesDeLaPlata(F, hoy);
+  const casa = suma(F?.fijos, f => fijoDelMes(f, mes)), cuotas = suma(F?.deudas, d => cuotaDelMes(d, mes)), pasado = mes < mesDeLaPlata(F, hoy);
   const caja = rubro => suma(gastosDelMes(F, mes, rubro).filter(x => !x.g.deCasa && !enTarjeta(x.g)), x => x.g.total);
   const alimentos = caja("alimentos") + (pasado ? 0 : Math.max(0, presupuesto - gastado));
   const gastos = caja("gastos") + (pasado ? 0 : Math.max(0, presupuestoG - gastadoG));
@@ -1478,7 +1482,7 @@ function vencimientos(F, mes){
   const pagos = new Set(F?.pagos?.[mes] || []);
   return [
     ...(F?.deudas || []).map(d => ({ clave: "d:" + d.id, nombre: d.nombre, monto: cuotaDelMes(d, mes), dia: d.dia, tipo: "cuota" })),
-    ...(F?.fijos || []).map(f => ({ clave: "f:" + f.id, nombre: f.nombre, monto: f.monto || 0, dia: f.dia, tipo: "fijo" }))
+    ...(F?.fijos || []).map(f => ({ clave: "f:" + f.id, nombre: f.nombre, monto: fijoDelMes(f, mes), dia: f.dia, tipo: "fijo" }))
   ].filter(v => v.monto > 0)
    .map(v => ({ ...v, fecha: v.dia ? fechaDelMes(mes, v.dia) : null, pagado: pagos.has(v.clave) }))
    .sort((a, b) => (a.dia || 99) - (b.dia || 99));
@@ -1519,10 +1523,10 @@ function cuotasQueFaltan(d, mes){
   const [y1, m1] = mes.split("-").map(Number), [y2, m2] = d.hasta.split("-").map(Number);
   return Math.max(0, (y2 - y1) * 12 + m2 - m1 + 1);
 }
-/* Deudas que siguen en `mes`: lo que se debe y cuánto se va en intereses por mes
-   (sin IVA). Tasa 0 es sin interés; sin tasa, no se sabe y no se cuenta. */
+/* Deudas que siguen en `mes` (sin las terminadas): lo que se debe y cuánto se va en
+   intereses por mes (sin IVA). Tasa 0 es sin interés; sin tasa, no se sabe y no se cuenta. */
 function resumenDeudas(F, mes){
-  const activas = (F?.deudas || []).filter(d => !d.hasta || d.hasta >= mes);
+  const activas = (F?.deudas || []).filter(d => !deudaTerminada(F, d, mes));
   return { activas, saldo: suma(activas, d => d.saldo),
            intereses: Math.round(suma(activas, d => d.tna ? d.saldo * d.tna / 1200 : 0)),
            sinTasa: activas.filter(d => d.tna == null).length };
@@ -1836,7 +1840,7 @@ function fraseFinanzas(fecha, tarde = false){ return deLaRueda(FRASES_FINANZAS, 
 function rumboFinanzas(F, hoy){
   const mes = F?.inicio > mesDe(hoy) ? F.inicio : mesDe(hoy), p = proyeccionFinanzas(F, mes, 24, hoy);
   const cierraDesde = p[0].sobra < 0 ? p.find((x, i) => i > 0 && p.slice(i, i + 12).every(y => y.sobra >= 0))?.mes || null : null;
-  const conFin = (F?.deudas || []).filter(d => d.hasta && d.hasta >= mes), fin = conFin.map(d => d.hasta).sort()[0];
+  const conFin = (F?.deudas || []).filter(d => d.hasta && !deudaTerminada(F, d, mes)), fin = conFin.map(d => d.hasta).sort()[0];
   const terminan = conFin.filter(d => d.hasta === fin);
   const sinFin = (F?.deudas || []).some(d => !d.hasta && d.saldo > 0);
   const v = vencimientos(F, mes);
@@ -3111,7 +3115,7 @@ function deudasHTML(F){
       <b>${aPesos(d.saldo)}</b></button></div>`;
   };
   return `<div class="card deudas"><div class="card-t">Deudas</div>
-    ${heroInner(aPesos(r.saldo), `en ${r.activas.length} ${r.activas.length === 1 ? "deuda" : "deudas"} · cuotas de ${MESES[Number(mes.slice(5)) - 1]}: ${aPesos(suma(r.activas, d => cuotaDelMes(d, mes)))}`)}
+    ${heroInner(aPesos(r.saldo), `en ${r.activas.length} ${r.activas.length === 1 ? "deuda" : "deudas"} · cuotas de ${MESES[Number(mes.slice(5)) - 1]}: ${aPesos(suma(F.deudas, d => cuotaDelMes(d, mes)))}`)}
     ${r.intereses ? `<p class="intereses" style="margin:12px 0 4px;font-size:14px">≈ <b>${aPesos(r.intereses)} por mes</b> se van en intereses, más IVA${r.sinTasa
       ? ` (sin contar ${r.sinTasa === 1 ? "1 deuda" : r.sinTasa + " deudas"} sin la tasa cargada)` : ""}.</p>` : ""}
     ${[...r.activas].sort((a, b) => (b.tna || 0) - (a.tna || 0) || b.saldo - a.saldo).map(fila).join("")}
@@ -3221,17 +3225,23 @@ const LISTAS_FIN = {
 };
 function detalleFin(tipo, x){
   if(tipo === "ingresos") return [x.dia ? `cobra el ${x.dia}` : "", x.meses?.length ? "junio y diciembre" : ""].filter(Boolean).join(" · ");
-  if(tipo === "fijos") return x.dia ? `el ${x.dia}` : "sin fecha";
+  if(tipo === "fijos") return [x.dia ? `el ${x.dia}` : "sin fecha", ...Object.entries(x.plan || {}).filter(([m]) => m >= mesDe(TODAY)).sort()
+    .map(([m, n]) => `${MESES[Number(m.slice(5)) - 1]}: ${aPesos(n)}`)].join(" · ");
   if(tipo === "deudas") return [`cuota ${aPesos(x.cuota)}`, x.dia ? `el ${x.dia}` : "", x.hasta ? `hasta ${mesCorto(x.hasta)}` : ""].filter(Boolean).join(" · ");
   return "";
 }
 function verListaFin(tipo){
-  const L = LISTAS_FIN[tipo], lista = fin()[tipo], monto = x => tipo === "deudas" ? x.saldo : x.monto;
+  const L = LISTAS_FIN[tipo], F = fin(), monto = x => tipo === "deudas" ? x.saldo : x.monto;
+  const terminadas = tipo === "deudas" ? F.deudas.filter(d => deudaTerminada(F, d, mesDelPlan(F))) : [];
+  const lista = F[tipo].filter(x => !terminadas.includes(x));     // lo que se debe; las terminadas, aparte
   const total = suma(tipo === "ingresos" ? lista.filter(x => !x.meses?.length) : lista, monto);
+  const fila = (x, b) => `<div class="fila"><button class="ce" data-id="${x.id}"><span class="n">${esc(x.nombre)}<small>${esc(detalleFin(tipo, x))}</small></span>
+      <b>${b}</b></button></div>`;
   sheet(`<h3>${L.titulo}</h3><p class="sub">${L.sub}</p>
-    ${lista.map(x => `<div class="fila"><button class="ce" data-id="${x.id}"><span class="n">${esc(x.nombre)}<small>${esc(detalleFin(tipo, x))}</small></span>
-      <b>${aPesos(monto(x))}</b></button></div>`).join("") || `<p style="color:var(--muted);font-size:13.5px;margin:0">Todavía no hay nada.</p>`}
+    ${lista.map(x => fila(x, aPesos(monto(x)))).join("") || `<p style="color:var(--muted);font-size:13.5px;margin:0">${terminadas.length ? "No debés nada." : "Todavía no hay nada."}</p>`}
     ${lista.length > 1 ? `<p class="pie">Total: <b>${aPesos(total)}</b>${tipo === "deudas" ? ", lo que debés" : tipo === "colchon" ? "" : " por mes"}.</p>` : ""}
+    ${terminadas.length ? `<p class="frec-t">Terminadas</p>${terminadas.map(d => fila(d, "✓ pagada")).join("")}
+      <p class="pie">Ya pagaste la última cuota: no cuentan en lo que debés.</p>` : ""}
     <div class="row2"><button class="btn ghost" data-x="c">Cerrar</button><button class="btn" data-x="a">${L.nuevo}</button></div>`);
   modal.querySelector('[data-x="c"]').onclick = closeSheet;
   modal.querySelector('[data-x="a"]').onclick = () => editarItemFin(tipo, null, true);
@@ -3246,9 +3256,12 @@ function editarItemFin(tipo, id, volver){
     : `<label class="campo" for="f_${k}">${t}</label>` + (c === "texto" ? `<input type="text" id="f_${k}" maxlength="60" value="${esc(valor(k))}">`
     : c === "mes" ? `<input type="month" id="f_${k}" value="${esc(valor(k))}">`
     : `<input type="number" id="f_${k}" inputmode="${c === "tasa" ? "decimal" : "numeric"}" min="${c === "dia" ? 1 : 0}"${c === "dia" ? ' max="31"' : ""} step="${c === "tasa" ? "0.01" : "1"}" value="${esc(valor(k))}">`);
-  const plan = tipo === "deudas" && x?.plan ? Object.entries(x.plan).sort() : [];
+  const conPlan = tipo === "fijos" || tipo === "deudas", plan = conPlan && x?.plan ? Object.entries(x.plan).sort() : [];
+  const mesP = FIN_MES || mesDelPlan(F), nomP = MESES[Number(mesP.slice(5)) - 1];   // el mes que se está mirando arriba
   sheet(`<h3>${x ? esc(x.nombre) : L.nuevo}</h3><p class="sub">${L.sub}</p>${L.campos.map(campo).join("")}
-    ${plan.length ? `<p class="detalle">Cuotas distintas: ${plan.map(([m, n]) => `${mesCorto(m)} ${aPesos(n)}`).join(" · ")}.</p>` : ""}
+    ${conPlan ? `<label class="campo" for="f_esteMes">${tipo === "deudas" ? `Cuota de ${nomP}, si es distinta` : `Solo en ${nomP}, si es distinto`} (opcional)</label>
+      <input type="number" id="f_esteMes" inputmode="numeric" min="0" step="1" value="${x?.plan?.[mesP] ?? ""}">` : ""}
+    ${plan.length ? `<p class="detalle">${tipo === "deudas" ? "Cuotas distintas" : "Montos distintos"}: ${plan.map(([m, n]) => `${mesCorto(m)} ${aPesos(n)}`).join(" · ")}.</p>` : ""}
     ${tipo === "deudas" && !x ? `<label class="chk"><input type="checkbox" id="f_nueva"> La saqué hoy: es una deuda nueva (cuenta para «Sin deuda nueva»)</label>` : ""}
     <div class="row2">${x ? `<button class="btn ghost danger" data-x="b">Borrar</button>` : `<button class="btn ghost" data-x="c">Cancelar</button>`}
       <button class="btn" data-x="o">Guardar</button></div>`);
@@ -3267,6 +3280,13 @@ function editarItemFin(tipo, id, volver){
       else if(c === "dia"){ const n = Number(v); if(!(Number.isInteger(n) && n >= 1 && n <= 31)){ toast("El día va del 1 al 31"); return; } nuevo[k] = n; }
       else if(c === "tasa"){ const n = Number(v.replace(",", ".")); if(!(n >= 0 && n <= 1000)){ toast("La tasa va en porcentaje, por ejemplo 55"); return; } nuevo[k] = n; }
       else if(c === "mes"){ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)){ toast("Elegí el mes de la última cuota"); return; } nuevo[k] = v; }
+    }
+    if(conPlan){                                  // el monto de un solo mes: vacío, sigue al de todos los meses
+      const v = $("#f_esteMes").value.trim(), n = Math.round(Number(v)), p = { ...(x?.plan || {}) };
+      if(v !== "" && !(n >= 0 && n <= 1e10)){ toast(`Revisá el monto de ${nomP}`); return; }
+      if(v === "") delete p[mesP]; else p[mesP] = n;
+      if(Object.keys(p).length) nuevo.plan = p;
+      if(x) delete x.plan;
     }
     if(x){ for(const [k] of L.campos) delete x[k === "aguinaldo" ? "meses" : k]; Object.assign(x, nuevo); }
     else F[tipo].push({ id: uid(), ...nuevo, ...($("#f_nueva")?.checked ? { alta: TODAY } : {}) });   // la fecha cuenta para "Sin deuda nueva"
@@ -4171,12 +4191,13 @@ function validarFinanzas(f){
   const texto = x => typeof x === "string" && x.trim().length > 0;
   const dia = x => x == null || (Number.isInteger(x) && x >= 1 && x <= 31);
   const orden = x => Number.isInteger(x) && x >= 0, pesos = x => typeof x === "number" && Number.isFinite(x) && Math.abs(x) <= 1e10;
+  const planOk = p => p == null || (esObj(p) && Object.entries(p).every(([m, n]) => esMes(m) && plata(n)));
   if(!esObj(f)) throw new Error(`El campo "finanzas" está roto.`);
   const listas = {
     ingresos: i => plata(i.monto) && dia(i.dia) && (i.meses == null || (Array.isArray(i.meses) && i.meses.every(m => Number.isInteger(m) && m >= 1 && m <= 12))),
-    fijos: x => plata(x.monto) && dia(x.dia),
+    fijos: x => plata(x.monto) && dia(x.dia) && planOk(x.plan),
     deudas: d => plata(d.saldo) && plata(d.cuota) && (d.tna == null || plata(d.tna)) && dia(d.dia) && (d.hasta == null || esMes(d.hasta)) && (d.alta == null || esFecha(d.alta))
-      && (d.plan == null || (esObj(d.plan) && Object.entries(d.plan).every(([m, n]) => esMes(m) && plata(n)))),
+      && planOk(d.plan),
     movimientos: m => esMes(m.mes) && typeof m.monto === "number" && Number.isFinite(m.monto) && (m.alta == null || esFecha(m.alta)),
     colchon: c => plata(c.monto)
   };

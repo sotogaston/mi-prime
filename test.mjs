@@ -2360,7 +2360,75 @@ console.log('\n== 46. Lo que gastás de verdad: cinta, calorías del celular, d�
   await c.close();
 }
 
-console.log('\n== 47. Capturas ==');
+console.log('\n== 47. Un monto de un solo mes y deudas terminadas ==');
+{
+  const F = finanzas(), L = cargarLogica(estado());
+  F.fijos[1].plan = { '2026-11': 50000 };
+  const colegio = mes => L.vencimientos(F, mes).find(v => v.nombre === 'Colegio')?.monto;
+  ok('un gasto de la casa con otro monto solo un mes: el colegio va 50 mil en noviembre y 100 mil en diciembre',
+    L.fijoDelMes(F.fijos[1], '2026-11') === 50000 && colegio('2026-11') === 50000 && colegio('2026-12') === 100000
+    && L.resumenMes(F, '2026-11', '2026-11-14').casa === 750000 && L.resumenMes(F, '2026-12', '2026-11-14').casa === 800000);
+  F.fijos[1].plan = { '2026-11': 0 };
+  ok('con 0 ese mes no se paga y no aparece en los vencimientos', colegio('2026-11') === undefined && colegio('2026-12') === 100000);
+  const G = finanzas();
+  ok('una deuda sigue mientras no se paga su última cuota', !L.deudaTerminada(G, G.deudas[2], '2026-11') && L.resumenDeudas(G, '2026-11').saldo === 1600000
+    && L.deudaTerminada(G, G.deudas[2], '2026-12'));
+  G.pagos = { '2026-11': ['d:d3'] };
+  ok('pagada la última cuota, termina: no cuenta en lo que debés ni en lo próximo que termina',
+    L.deudaTerminada(G, G.deudas[2], '2026-11') && L.resumenDeudas(G, '2026-11').saldo === 1500000 && L.resumenDeudas(G, '2026-11').activas.length === 2
+    && L.rumboFinanzas(G, '2026-11-14').terminan.mes === '2026-12' && L.rumboFinanzas(G, '2026-11-14').terminan.nombres.join() === 'Tarjeta en cuotas'
+    && L.vencimientos(G, '2026-11').find(v => v.clave === 'd:d3').pagado);
+
+  const st = estado(); st.finanzas = G;
+  const { p, c, errs } = await abrirEn('2026-11-14', st);
+  const S = () => p.evaluate(() => window.__prime.S), casa = mes => p.evaluate(m => { const P = window.__prime; return P.resumenMes(P.S.finanzas, m, '2026-11-14').casa; }, mes);
+  const valida = await p.evaluate(() => [{ '2026-11': 5 }, { 'nov': 5 }, { '2026-11': -5 }, [5]].map(plan => {
+    try { window.__prime.validarFinanzas({ fijos: [{ id: 'f1', nombre: 'Alquiler', monto: 1, plan }] }); return 'ok'; } catch (e) { return 'no'; } }).join());
+  ok('el respaldo valida el monto de un mes (' + valida + ')', valida === 'ok,no,no,no');
+  await ir(p, 'finanzas');
+  const deudas = await p.locator('.deudas').innerText();
+  ok('la tarjeta de deudas: 1,5 M en 2 deudas, con las cuotas de noviembre enteras y 1 terminada', /\$ 1\.500\.000\s+en 2 deudas · cuotas de noviembre: \$ 550\.000/.test(deudas)
+    && /Hay 1 terminada/.test(deudas) && !/Billetera/.test(deudas));
+  await p.locator('.deudas [data-act="flista"]').click(); await p.waitForTimeout(100);
+  const lista = await p.locator('.sheet').innerText();
+  ok('la lista: lo que debés sin la terminada, y la terminada aparte', /Total: \$ 1\.500\.000, lo que debés/.test(lista)
+    && /Terminadas\s+Billetera[\s\S]*✓ pagada/i.test(lista) && /no cuentan en lo que debés/.test(lista));
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('.fin-mes [data-act="flista"][data-k="fijos"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet .fila', { hasText: 'Colegio' }).locator('.ce').click();
+  ok('al editar un gasto de la casa se puede poner otro monto solo en noviembre', /Solo en noviembre, si es distinto/.test(await p.locator('.sheet').innerText())
+    && await p.locator('#f_esteMes').inputValue() === '');
+  await p.locator('#f_esteMes').fill('50000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  let f2 = (await S()).finanzas.fijos.find(f => f.id === 'f2');
+  ok('guarda 50 mil en noviembre y deja 100 mil para los otros meses', f2.monto === 100000 && JSON.stringify(f2.plan) === '{"2026-11":50000}'
+    && await casa('2026-11') === 750000 && await casa('2026-12') === 800000
+    && /sin fecha · noviembre: \$ 50\.000/.test(await p.locator('.sheet .fila', { hasText: 'Colegio' }).innerText()));
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('[data-act="fmes"][data-n="1"]').click(); await p.waitForTimeout(100);
+  await p.locator('.fin-mes [data-act="flista"][data-k="fijos"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet .fila', { hasText: 'Colegio' }).locator('.ce').click();
+  ok('mirando diciembre, el campo es para diciembre', /Solo en diciembre, si es distinto/.test(await p.locator('.sheet').innerText()) && await p.locator('#f_esteMes').inputValue() === '');
+  await p.locator('#f_monto').fill('120000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  f2 = (await S()).finanzas.fijos.find(f => f.id === 'f2');
+  ok('cambiar el monto de todos los meses no pisa el de noviembre', f2.monto === 120000 && JSON.stringify(f2.plan) === '{"2026-11":50000}');
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('[data-act="fmes"][data-n="-1"]').click(); await p.waitForTimeout(100);
+  await p.locator('.fin-mes [data-act="flista"][data-k="fijos"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet .fila', { hasText: 'Colegio' }).locator('.ce').click();
+  await p.locator('#f_esteMes').fill(''); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('vacío, noviembre vuelve al monto de siempre', !('plan' in (await S()).finanzas.fijos.find(f => f.id === 'f2')) && await casa('2026-11') === 820000);
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('.deudas [data-act="flista"]').click(); await p.waitForTimeout(100);
+  await p.locator('.sheet .fila', { hasText: 'Préstamo caro' }).locator('.ce').click();
+  ok('en una deuda, el campo es la cuota del mes, con la que ya tenía', /Cuota de noviembre, si es distinta/.test(await p.locator('.sheet').innerText())
+    && await p.locator('#f_esteMes').inputValue() === '250000');
+  await p.locator('#f_esteMes').fill('260000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('y cambia solo esa cuota', JSON.stringify((await S()).finanzas.deudas[0].plan) === '{"2026-11":260000}' && (await S()).finanzas.deudas[0].cuota === 150000);
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 48. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);

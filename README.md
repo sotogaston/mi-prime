@@ -299,7 +299,13 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
 - **Deudas**: lo que se debe, la tasa, la cuota y cuándo termina cada una, con
   la más cara arriba; el total y cuánto se va por mes en intereses (más IVA).
   Una deuda puede tener cuotas distintas algunos meses (`plan`): la primera de
-  un préstamo, las compras en cuotas de la tarjeta.
+  un préstamo, las compras en cuotas de la tarjeta. Cuando se marca pagada la
+  última cuota, la deuda **termina**: deja de contar en lo que debés y en la
+  lista aparece aparte, como *Terminadas*.
+- **Un monto de un solo mes**: al editar un gasto de la casa o una deuda, *Solo
+  en noviembre, si es distinto* cambia el monto únicamente del mes que se está
+  mirando arriba (lo que falta pasar este mes, una cuota distinta); vacío, sigue
+  el de todos los meses, y 0 es que ese mes no se paga.
 - **Los próximos 12 meses**: lo que sobra y cómo quedaría el colchón.
 - **A dónde vas**: frases con tus números que se actualizan solas: cuánto
   falta o sobra este mes y desde cuándo cierran solos, qué deuda termina y
@@ -445,7 +451,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                568 pruebas automatizadas (Playwright)
+├── test.mjs                583 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
