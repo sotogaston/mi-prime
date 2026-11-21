@@ -266,7 +266,21 @@ hábitos: cargás lo que pasa y la app hace las cuentas.
   nuevo* toma los saldos de hoy como punto de partida: lo cobrado y pagado sigue
   marcado, pero como ya incluido en esos saldos, y se borran los ajustes y lo
   marcado del mes que viene. Hoy también muestra tu plata, lo libre y el día que
-  no alcanza.
+  no alcanza. Lo marcado pagado con una fecha anterior a la del saldo de esa
+  cuenta (un pago del 17 marcado después de cargar el saldo del 21) ya está en el
+  saldo y no se resta dos veces.
+- **Primero, la comida**: con *Apartar primero la plata para comer* se elige
+  cuánto por día (propone el presupuesto de alimentos dividido 30). La caja lo
+  separa antes que cualquier pago, del día de hoy hasta el día antes del próximo
+  cobro: lo libre es para otros gastos y el aviso dice qué pago no entra *sin
+  tocar la plata de comer*.
+- **Pasar al mes que viene**: en la hoja de algo pendiente de la caja, *No llego
+  este mes: pasarlo a diciembre* deja ese gasto de la casa o esa cuota en $ 0 este
+  mes y la suma a la del mes siguiente (la última cuota corre la deuda un mes; en
+  una cuota avisa de los punitorios y del Veraz). Lo de una sola vez cambia de
+  mes. Un ingreso no se pasa.
+- **Lo de una sola vez con día**: un adelanto, un cambio de dólares o un
+  descuento del sueldo pueden llevar su día (`fecha`), y caen ese día en la caja.
 
 - **El plan del mes** (con ‹ › para ver otros): lo que entra, la casa, alimentos
   y cuotas, y cuánto **sobra o falta**. Lo que pasa una sola vez (un adelanto
@@ -451,7 +465,7 @@ mi-prime/
 ├── capacitor.config.json   id de la app y color del ícono de los avisos
 ├── .github/workflows/      pruebas y APK firmado en cada push
 ├── privacidad.html         qué datos lee la app (Health Connect la enlaza)
-├── test.mjs                583 pruebas automatizadas (Playwright)
+├── test.mjs                601 pruebas automatizadas (Playwright)
 ├── cargar-logica.mjs       recorta la lógica de index.html para probarla en Node
 ├── mi-prime-v2.pruebas.js  pruebas de la lógica contra tus datos reales (fuera del repo)
 ├── ia-entrada.mjs          entrada para empaquetar el SDK de Anthropic (npm run vendor)
