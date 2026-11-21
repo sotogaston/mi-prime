@@ -2428,7 +2428,78 @@ console.log('\n== 47. Un monto de un solo mes y deudas terminadas ==');
   await c.close();
 }
 
-console.log('\n== 48. Capturas ==');
+console.log('\n== 48. Primero la comida, pasar al mes que viene y pagos marcados tarde ==');
+{
+  const L = cargarLogica(estado());
+  const cuentas = [{ id: 'mp', nombre: 'Mercado Pago', saldo: 100000, fecha: '2026-11-21', n: 5 }, { id: 'ef', nombre: 'Efectivo', saldo: 50000, fecha: '2026-11-01', n: 1 }];
+  const F = { ...finanzas(), cuentas, ajustes: [], sello: 8, gastos: {},
+    hechos: { '2026-11': { 'f:f1': { monto: -700000, cuenta: 'mp', fecha: '2026-11-17', n: 6 } } },
+    transferencias: [{ id: 't1', fecha: '2026-11-17', de: 'mp', a: 'ef', monto: 10000, n: 7 }] };
+  ok('un pago o una transferencia del 17 marcados después del saldo del 21 ya están en ese saldo; en el de una cuenta cargada antes, cuentan',
+    L.saldoCuenta(F, cuentas[0]) === 100000 && L.saldoCuenta(F, cuentas[1]) === 60000);
+  F.hechos['2026-11']['f:f1'] = { monto: -700000, cuenta: 'mp', fecha: '2026-11-21', n: 8 };
+  ok('el mismo día del saldo, lo marcado después resta', L.saldoCuenta(F, cuentas[0]) === -600000);
+  delete F.hechos['2026-11']['f:f1']; F.transferencias = [];
+  const sin = L.cajaDelMes(F, '2026-11-21');
+  F.comidaDia = 25000;
+  const con = L.cajaDelMes(F, '2026-11-21');
+  ok('primero la comida: 25 mil por día del 21 al 29 (el día antes del cobro) son 225 mil apartados antes de los pagos',
+    con.comida === 225000 && con.diasComida === 9 && con.comidaHasta === '2026-11-29' && con.libre === sin.libre - 225000
+    && con.pendientes[0].queda === sin.pendientes[0].queda - 225000 && sin.comida === 0);
+  ok('el día del cobro ya no hay nada que apartar del mes que termina', L.cajaDelMes(F, '2026-11-30').comida === 0);
+  const G = JSON.parse(JSON.stringify(F));
+  G.movimientos.push({ id: 'm2', mes: '2026-11', nombre: 'Cambio de dólares', monto: 640000, fecha: '2026-11-22' });
+  ok('algo de un solo mes con día cae en su día en la caja', L.cajaDelMes(G, '2026-11-21').pendientes.find(e => e.clave === 'm:m2').fecha === '2026-11-22');
+  ok('pasar al mes que viene: el colegio queda en 0 en noviembre y diciembre suma los dos', L.postergar(G, '2026-11', 'f:f2')
+    && JSON.stringify(G.fijos[1].plan) === '{"2026-11":0,"2026-12":200000}' && !L.vencimientos(G, '2026-11').some(v => v.clave === 'f:f2')
+    && L.vencimientos(G, '2026-12').find(v => v.clave === 'f:f2').monto === 200000);
+  ok('una cuota con monto propio se suma a la del mes siguiente; la última cuota corre la deuda un mes',
+    L.postergar(G, '2026-11', 'd:d1') && JSON.stringify(G.deudas[0].plan) === '{"2026-11":0,"2026-12":400000}'
+    && L.postergar(G, '2026-11', 'd:d3') && G.deudas[2].hasta === '2026-12' && L.cuotaDelMes(G.deudas[2], '2026-12') === 100000 && L.cuotaDelMes(G.deudas[2], '2026-11') === 0);
+  ok('lo de una sola vez cambia de mes y pierde el día; un ingreso o algo en 0 no se pasa',
+    L.postergar(G, '2026-11', 'm:m2') && G.movimientos.find(m => m.id === 'm2').mes === '2026-12' && !('fecha' in G.movimientos.find(m => m.id === 'm2'))
+    && !L.postergar(G, '2026-11', 'i:i1') && !L.postergar(G, '2026-11', 'f:f2') && !L.postergar(G, '2026-11', 'd:nada'));
+
+  const st = estado(); st.finanzas = { ...finanzas(), cuentas: cuentas.map(c => ({ ...c, fecha: '2026-11-21' })), hechos: {}, ajustes: [], sello: 5, gastos: {} };
+  const { p, c, errs } = await abrirEn('2026-11-21', st);
+  const S = () => p.evaluate(() => window.__prime.S), caja = () => p.locator('.caja').innerText();
+  await ir(p, 'finanzas');
+  await p.locator('.caja [data-act="cajaComida"]').click();
+  ok('apartar para comer propone el presupuesto de alimentos por día', /Primero, la comida/.test(await p.locator('.sheet').innerText())
+    && await p.locator('#cdMonto').inputValue() === '13000');
+  await p.locator('#cdMonto').fill('25000'); await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('la caja aparta primero la comida y dice que lo que falta es sin tocarla', (await S()).finanzas.comidaDia === 25000
+    && /Primero, la comida: \$ 225\.000 apartados para comer hasta el 29\/11 \(\$ 25\.000 por día\)/.test(await caja())
+    && /sin tocar la plata de comer/.test(await caja()) && /no te alcanza para Alquiler sin tocar la plata de comer: faltan \$ 775\.000\. Si no llegás, tocalo y pasalo a diciembre/.test(await caja()));
+  await ir(p, 'hoy');
+  ok('en Hoy también: con lo de comer ya apartado', /con \$ 225\.000 ya apartados para comer hasta el 29\/11/.test(await p.locator('.caja-hoy').innerText()));
+  await ir(p, 'finanzas');
+  await p.locator('.caja [data-act="cajaHecho"][data-k="f:f2"]').click();
+  await p.locator('.sheet [data-x="p"]').click();
+  ok('el colegio se puede pasar a diciembre: noviembre en 0 y diciembre suma los dos', /Este mes queda en \$ 0 y en diciembre se suma: \$ 100\.000 más\. Avisale a quien le pagás\./.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('pasado: sale de la caja de noviembre', JSON.stringify((await S()).finanzas.fijos[1].plan) === '{"2026-11":0,"2026-12":200000}'
+    && await p.locator('.caja [data-k="f:f2"]').count() === 0);
+  await p.locator('.caja [data-act="cajaHecho"][data-k="d:d1"]').click();
+  await p.locator('.sheet [data-x="p"]').click();
+  ok('en una cuota avisa de los punitorios y del Veraz', /punitorios/.test(await p.locator('.sheet').innerText()) && /Veraz/.test(await p.locator('.sheet').innerText()));
+  await p.locator('.sheet [data-x="c"]').click();
+  await p.locator('.caja [data-act="cajaHecho"][data-k="i:i1"]').first().click().catch(() => {});
+  ok('un ingreso no se pasa de mes', await p.locator('.sheet [data-x="p"]').count() === 0);
+  await p.keyboard.press('Escape'); await p.evaluate(() => document.querySelector('.sheet [data-x="c"]')?.click()); await p.waitForTimeout(100);
+  await p.locator('[data-act="fmov"]').click();
+  await p.locator('#mNombre').fill('Cambio de dólares'); await p.locator('#mMonto').fill('640000'); await p.locator('#mFecha').fill('2026-11-22');
+  await p.locator('.sheet [data-x="o"]').click(); await p.waitForTimeout(150);
+  ok('algo de un solo mes se carga con su día y cae ese día en la caja', (await S()).finanzas.movimientos.some(m => m.nombre === 'Cambio de dólares' && m.fecha === '2026-11-22')
+    && /22\/11\s+Cambio de dólares/.test(await caja()));
+  const valida = await p.evaluate(() => [{ comidaDia: 25000 }, { comidaDia: -1 }, { movimientos: [{ id: 'x', mes: '2026-11', nombre: 'a', monto: 1, fecha: '22/11' }] }].map(x => {
+    try { window.__prime.validarFinanzas(x); return 'ok'; } catch (e) { return 'no'; } }).join());
+  ok('el respaldo valida lo apartado para comer y el día de lo de un solo mes (' + valida + ')', valida === 'ok,no,no');
+  ok('sin errores de página: ' + JSON.stringify(errs), errs.length === 0);
+  await c.close();
+}
+
+console.log('\n== 49. Capturas ==');
 await page.locator('nav button[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 await page.screenshot({ path: resolve(HERE, 'shot-hoy.png') });
 await page.locator('nav button[data-tab="mes"]').click(); await page.waitForTimeout(400);
